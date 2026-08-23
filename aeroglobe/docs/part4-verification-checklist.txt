@@ -1,0 +1,21 @@
+================================================================================
+PARTE 4.12 — CHECKLIST DE VERIFICACION DE COLISION (del tutorial original)
+================================================================================
+Usa esta lista para validar el subsistema de terreno/colision (PARTE 4)
+una vez conectado a un motor de render real (Cesium) y a un cuerpo rigido
+real (PARTE 5). No es un test automatizado: son pruebas manuales en la app.
+
+[ ] En una pista aplanada, el Cessna reposa sin oscilar. Suspensiones
+    comprimidas ~30-50 % del restLength.
+[ ] Un spike de tile (fuerza cautious) NO lanza el avion.
+[ ] A 3000 m AGL, withinCollisionRange es false (mira un flag en pantalla).
+[ ] Aterrizaje a 500 ft/min: el tren absorbe, no hay rebote de fuselaje.
+[ ] Aterrizaje a 2000 ft/min: crash si crashDetection.
+[ ] En una ladera de 20 deg, el avion se alinea con la normal, no se
+    clava el ala en el monte.
+[ ] En un acantilado, no "resbalas" por el plano extrapolado.
+[ ] globe.getHeight(undefined) no NaN-ea la altitud. Fallback al ultimo valor.
+[ ] flyTo a un aeropuerto: el avion aparece SOBRE la pista, no 40 m bajo ella.
+    (esto falla si usas sample sincrono antes de que el tile exista:
+     usa getGuarantiedGroundAltitude).
+================================================================================

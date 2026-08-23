@@ -1,0 +1,89 @@
+================================================================================
+PARTE 6 — NUBES — CHECKLIST DE VERIFICACION MANUAL
+================================================================================
+No automatizable sin Cesium + GPU real (shaders, PostProcessStage). Probar
+en la app real tras cablear atmosphere-stage.js + cloud-manager.js en
+PARTE 12 (ensamblado).
+
+--------------------------------------------------------------------------------
+Geometria (6.1)
+--------------------------------------------------------------------------------
+[ ] En el horizonte, las nubes se CURVAN con la Tierra. Si se van al
+    espacio, se esta usando un plano en vez de la cascara esferica
+    (revisar que el shader use raySphereIntersect con cloudBaseRadius/
+    cloudTopRadius, no z=cloudBase fijo).
+[ ] A latitud alta (ej. 60S), las nubes NO atraviesan el hielo/terreno:
+    confirma que realPlanetRadius se recalcula cada segundo con el radio
+    LOCAL del elipsoide (atmosphere-stage.js: fx.atmosphere.update),
+    no un radio fijo de 6371 km.
+
+--------------------------------------------------------------------------------
+Densidad y forma (6.2)
+--------------------------------------------------------------------------------
+[ ] Variedad de formas: cumulus redondeados, stratocumulus finos y
+    extendidos, y (con cobertura alta) cumulonimbus en torre. Si todo se
+    ve igual, revisar que shapeHeight este realmente separando los tres
+    perfiles verticales (cumuloNimbus/cumulus/stratoCumulus).
+[ ] Las nubes DERIVAN visiblemente con el viento en unos pocos minutos
+    (adveccion: windVector * czm_frameNumber * 0.0002).
+
+--------------------------------------------------------------------------------
+Ray marching (6.3) y calidad (6.4)
+--------------------------------------------------------------------------------
+[ ] Atravesar un cumulus en vuelo recto: 1-2 s de "sopa" blanca
+    translúcida, NO un sprite 2D que rota hacia la camara (eso indicaria
+    que sigue activo el sistema A en vez del B, o que volumetric=false).
+[ ] Sin banding de anillos concentricos a la camara (blue noise dither
+    funcionando: revisar textura /shaders/noise/bluenoise.png cargada).
+[ ] Calidad 0: fluido en movil/gama baja (10 pasos). Calidad 7: 300
+    pasos, solo desktop de gama media/alta — medir FPS en ambos extremos.
+[ ] Al bajar de calidad, las nubes lejanas pierden detalle (LOD) antes
+    que las cercanas, no de golpe en todo el frame.
+
+--------------------------------------------------------------------------------
+Iluminacion (6.3 fases, 6.5 sombras)
+--------------------------------------------------------------------------------
+[ ] Silver lining: con el sol detras de un borde de cumulus, el borde se
+    ilumina intensamente (lobulo de Schlick funcionando).
+[ ] Nubes vistas con el sol de frente/lateral se ven mas planas/opacas
+    (mix hacia isotropico correcto).
+[ ] Sombra de nube sobre el terreno: visible, SUAVE (nunca negro puro:
+    mask tiene piso de 0.2), y se mueve con el sol/las nubes.
+[ ] Auto-sombra: la base de una nube gruesa se ve mas oscura que la
+    cima (heightRatio apagando el ambient hacia el suelo).
+
+--------------------------------------------------------------------------------
+Overcast y transiciones (6.6 composite, 6.8 CloudManager)
+--------------------------------------------------------------------------------
+[ ] Bajo overcast (cobertura 100%): el suelo se desatura y oscurece
+    (setImageryColorModifier('cloudcover', ...) activo), sol OCULTO,
+    sombras deshabilitadas.
+[ ] Sobre overcast: sol visible, "mar de algodon" de nubes abajo,
+    fog de fondo en 0, sombras habilitadas de nuevo.
+[ ] Al atravesar la capa de overcast (ascenso o descenso), la
+    transicion de fog es progresiva, no un salto de golpe a blanco
+    total ni un pop instantaneo del techo (CloudCover) apareciendo/
+    desapareciendo.
+[ ] Al alejarse mucho del punto de spawn original (> refreshDistance),
+    las nubes billboard se reciclan sin dejar un "agujero" notorio
+    donde no habia nubes.
+
+--------------------------------------------------------------------------------
+Cobertura en tiempo real (6.9)
+--------------------------------------------------------------------------------
+[ ] Con realtime=true, la forma de la cobertura sigue aproximadamente el
+    mapa satelital real de la zona (verificar contra una imagen de
+    referencia del proveedor).
+[ ] La textura se refresca sin recargar la app (refreshRealtimeCoverage
+    corriendo cada REALTIME_CLOUDS_UPDATE_PERIOD_MS).
+
+--------------------------------------------------------------------------------
+Interaccion con PARTE 5 (fisica) y PARTE 8 (clima)
+--------------------------------------------------------------------------------
+[ ] weather.currentWindVector (que usan los airfoils, PARTE 5.4) y
+    weather.currentWindVectorWC (que usan las nubes) son consistentes en
+    direccion: el avion deriva y las nubes derivan al mismo lado.
+[ ] Al cambiar cloudCover/cloudBase/cloudTop desde el panel de clima
+    (PARTE 8, pendiente), tanto CloudManager (billboards) como
+    atmosphere-stage (volumetricas) reaccionan sin necesitar un reload.
+================================================================================

@@ -1,0 +1,124 @@
+{
+  "name": "Trainer 172",
+  "mass": 1100,
+  "inertia": [0.18, 0.10, 0.14],
+  "scale": 1,
+  "startAltitude": 1.2,
+  "minimumSpeed": 70,
+  "minRPM": 700,
+  "maxRPM": 2700,
+  "engineInertia": 0.25,
+  "RPM2PropAS": 0.5,
+  "dragCoefficient": 0.35,
+  "startupTime": 2,
+  "zeroThrustAltitude": 14000,
+  "brakeDamping": 3,
+  "Vspeeds": { "VS0": 40, "VS": 48, "VFE": 85, "VNO": 125, "VNE": 160 },
+  "contactProperties": {
+    "wheel":   { "frictionCoef": 0.8, "dynamicFriction": 0.02, "rollingFriction": 0.015, "lockSpeed": 0.4 },
+    "airfoil": { "frictionCoef": 0.4, "dynamicFriction": 0.3,  "rollingFriction": 0.3,   "lockSpeed": 0.01 },
+    "body":    { "frictionCoef": 0.5, "dynamicFriction": 0.4,  "rollingFriction": 0.4,   "lockSpeed": 0.01 }
+  },
+  "parts": [
+    {
+      "name": "root",
+      "type": "body",
+      "position": [0, 0, 0],
+      "points": { "centerOfMass": [0, 0.1, 0] },
+      "collisionPoints": [[0, 0, -0.5]],
+      "model": "models/trainer/fuselage.gltf"
+    },
+    {
+      "name": "leftWing",
+      "type": "airfoil",
+      "parent": "root",
+      "position": [-0.4, 0.2, 0.3],
+      "span": 5.5, "chord": 1.47, "area": 8.1,
+      "stalls": true, "stallIncidence": 16, "zeroLiftIncidence": 22,
+      "efficiencyFactor": 0.75,
+      "forceDirection": 2,
+      "points": { "forceSourcePoint": [-2.2, 0.0, 0.0] },
+      "collisionPoints": [[-5.0, 0, 0]],
+      "animations": [
+        { "type": "rotate", "axis": "X", "value": "roll", "ratio": -15 }
+      ]
+    },
+    {
+      "name": "rightWing",
+      "type": "airfoil",
+      "parent": "root",
+      "position": [0.4, 0.2, 0.3],
+      "span": 5.5, "chord": 1.47, "area": 8.1,
+      "stalls": true, "stallIncidence": 16, "zeroLiftIncidence": 22,
+      "efficiencyFactor": 0.75,
+      "forceDirection": 2,
+      "points": { "forceSourcePoint": [2.2, 0.0, 0.0] },
+      "collisionPoints": [[5.0, 0, 0]],
+      "animations": [
+        { "type": "rotate", "axis": "X", "value": "roll", "ratio": 15 }
+      ]
+    },
+    {
+      "name": "hStab",
+      "type": "airfoil",
+      "parent": "root",
+      "position": [0, -4.6, 0.4],
+      "area": 2.0,
+      "forceDirection": 2,
+      "points": { "forceSourcePoint": [0, 0, 0] },
+      "animations": [
+        { "type": "rotate", "axis": "X", "value": "pitch", "ratio": 20 },
+        { "type": "rotate", "axis": "X", "value": "trim",  "ratio": 8 }
+      ]
+    },
+    {
+      "name": "vStab",
+      "type": "airfoil",
+      "parent": "root",
+      "position": [0, -4.7, 0.9],
+      "area": 1.4,
+      "forceDirection": 0,
+      "points": { "forceSourcePoint": [0, 0, 0] },
+      "animations": [
+        { "type": "rotate", "axis": "Z", "value": "yaw", "ratio": 20 }
+      ]
+    },
+    {
+      "name": "engine",
+      "type": "engine",
+      "parent": "root",
+      "position": [0, 2.1, 0.1],
+      "thrust": 3200,
+      "forceDirection": 1,
+      "points": { "forceSourcePoint": [0, 0, 0] }
+    },
+    {
+      "name": "leftWheel",
+      "type": "wheel",
+      "parent": "root",
+      "position": [-1.15, 0.15, -1.05],
+      "collisionPoints": [[0, 0, -0.15]],
+      "suspension": { "restLength": 0.22, "stiffness": 9, "damping": 0.45, "hardPoint": 0.85 }
+    },
+    {
+      "name": "rightWheel",
+      "type": "wheel",
+      "parent": "root",
+      "position": [1.15, 0.15, -1.05],
+      "collisionPoints": [[0, 0, -0.15]],
+      "suspension": { "restLength": 0.22, "stiffness": 9, "damping": 0.45, "hardPoint": 0.85 }
+    },
+    {
+      "name": "noseWheel",
+      "type": "wheel",
+      "parent": "root",
+      "position": [0, 1.55, -1.0],
+      "collisionPoints": [[0, 0, -0.12]],
+      "suspension": { "restLength": 0.18, "stiffness": 6, "damping": 0.4, "hardPoint": 0.85 }
+    }
+  ],
+  "cameras": {
+    "follow":  { "distance": 12, "orientation": [0, 8, 0] },
+    "cockpit": { "position": [0, 0.9, 0.55], "insideView": true }
+  }
+}

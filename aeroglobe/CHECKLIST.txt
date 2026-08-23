@@ -1,0 +1,663 @@
+================================================================================
+AEROGLOBE — CHECKLIST DE CONSTRUCCION
+Basado en: tutorial-simulador-vuelo-completo.txt
+================================================================================
+Formato: [x] hecho y probado | [ ] pendiente
+Se actualiza cada vez que se entrega un nuevo lote de archivos.
+
+--------------------------------------------------------------------------------
+PARTE 0 — Arquitectura del simulador
+--------------------------------------------------------------------------------
+[x] Resumen conceptual revisado (motor globo / fisica / cielo, frame loop,
+    niveles de pausa, tabla de calidad grafica vs fisica).
+    -> Documentado en la conversacion; se traduce a codigo real cuando se
+       construya PARTE 10 (loop principal).
+
+--------------------------------------------------------------------------------
+PARTE 1 — Constantes fisicas y matematicas
+--------------------------------------------------------------------------------
+[x] src/core/constants.js
+    - GRAVITY, ISA, conversion de unidades, aerodinamica base
+    - clamp, fixAngle360, fixAngle, fixAngles, snapToUnit
+    - exponentialSmoothing (filtro IIR de 1 polo con estado por nombre)
+    PROBADO: GM_RL ~5.2576, clamp, fixAngle OK.
+
+--------------------------------------------------------------------------------
+PARTE 2 — Biblioteca vectorial V2 / V3 / M33
+--------------------------------------------------------------------------------
+[x] src/core/vectors.js
+    - V2 (add/sub/scale/length/fastLengthApprox)
+    - V3 completo (incluye rotate de Rodrigues, exponentialSmoothing vectorial)
+    - M33 (identity, transform, multiplyExpanded, rotationX/Y/Z, setFromEuler,
+      getOrientation con manejo de gimbal lock, makeOrthonormalFrame)
+    - intersectRayTriangle (2.2)
+    PROBADO: cross product, transform por identidad, rotationZ 90 grados OK.
+
+--------------------------------------------------------------------------------
+PARTE 3 — Coordenadas geograficas
+--------------------------------------------------------------------------------
+[x] src/core/coordinates.js
+    - xy2ll / ll2xy / lla2xyz / xyz2lla_fast (aproximacion plana, 3.1)
+    - xyz2lla_cesium (conversion exacta con elipsoide, requiere Cesium+viewer
+      inyectados, 3.2)
+    - llaDistanceMeters
+    - coord2tile / tile2coord (web mercator) + WGS84Coord2tile (3.3)
+    - lookAt (3.4)
+    PROBADO: round-trip xyz<->lla exacto, distancia 1 grado lat = 111319 m
+    (esperado ~111320 m), tiles y lookAt coherentes.
+
+--------------------------------------------------------------------------------
+PARTE 4 — TERRENO Y COLISION  (CRITICO)
+--------------------------------------------------------------------------------
+[x] 4.1  Proveedor de terreno SRTM
+    -> src/terrain/terrain-provider.js : initTerrain()
+[x] 4.2  Aplanar pistas (FlatRunwayTerrainProvider)
+    -> src/terrain/terrain-provider.js : FlatRunwayTerrainProvider,
+       makeRunwayRecord()
+[x] 4.3  Muestrear altura: getGroundAltitude (+ filtro anti-spike de altura,
+         getGuarantiedGroundAltitude, getFastTerrainElevation)
+    -> src/terrain/ground-sampling.js : createGroundAltitudeApi()
+[x] 4.4  Normal del terreno por tres puntos (+ throttling en modo degradado)
+    -> src/terrain/ground-sampling.js : getGroundNormal (dentro de
+       createGroundAltitudeApi), getNormalFromCollision(), throttleWithDefault()
+[x] 4.5  getCollisionResult y plano local (proyeccion sobre plano de contacto
+         previo cuando degradedCollisions/app/cautiousWithTerrain)
+    -> src/terrain/ground-sampling.js : getAltitudeAtPointFromCollisionResult(),
+       getCollisionResult()
+[x] 4.6  Puntos de contacto de la aeronave (attachCollisionPoints,
+         contactProperties por tipo, ejemplo Cessna 172)
+    -> src/terrain/collision-points.js
+    PROBADO: proyeccion de plano (piso llano y con pendiente), 4 collision
+    points del Cessna 172 de ejemplo, contactProperties de rueda OK.
+[x] 4.7  Deteccion de contactos (buoyancy / raycast-suspension / standard)
+    -> src/terrain/contact-detection.js : collectContacts(), handleContacts()
+       (incluye correccion de penetracion antes de resolver impulsos, y el
+       bypass completo cuando !sim.withinCollisionRange)
+[x] 4.8  Respuesta de colision (Jacobiano, impulso, friccion de Coulomb,
+         friccion de rueda rolling/locked + frenos, crash detection)
+    -> src/terrain/collision-response.js : resolveContacts(), resolveWheelFriction()
+    PROBADO: mock de rigid body, contacto standard con velocidad de caida
+    -3 m/s produce impulso ascendente +3000 N·s (m=1000, e=0) -> correcto.
+[x] 4.9  Gestion de elevacion por frame (terrainElevationManagement,
+         withinCollisionRange, flight.reset)
+    -> src/terrain/elevation-management.js : createFlightTerrainManager()
+[x] 4.10 Periodo "cautious" al cambiar de tiles (probeTerrain, flyTo seguro
+         con getGuarantiedGroundAltitude)
+    -> src/terrain/elevation-management.js : attachCautiousTerrainProbing(),
+       makeFlyTo()
+[x] 4.11 Sombras proyectadas sobre el terreno (decal glTF orientado a la
+         normal del suelo)
+    -> src/terrain/ground-shadow.js : Shadow
+[x] 4.12 Checklist de verificacion de colision (documentacion, pruebas
+         manuales en la app real — no automatizable sin Cesium)
+    -> docs/part4-verification-checklist.txt
+
+  NOTA: PARTE 4 COMPLETA. Los archivos de fisica/colision estan escritos
+  como modulos puros que reciben `api` (contexto Cesium), `sim` (estado
+  global) y `rb`/`aircraft` (cuerpo rigido, PARTE 5) INYECTADOS por
+  parametro, en vez de globals, para poder probarlos con mocks sin Cesium
+  real (como se hizo arriba). Cuando se construya PARTE 10 (loop principal)
+  se ensamblan todos estos en el objeto `flight` real.
+
+--------------------------------------------------------------------------------
+PARTE 5 — FISICAS DE VUELO  (CRITICO)
+--------------------------------------------------------------------------------
+[x] 5.1  Integrador de cuerpo rigido
+    -> src/core/rigidbody.js : RigidBody (reset, setMassProps,
+       updateInertiaTensor, getVelocityInLocalPoint, applyForce/Torque,
+       applyImpulse/CentralImpulse/TorqueImpulse, computeJacobian,
+       integrateVelocities, integrateTransform, setCurrentAcceleration)
+    PROBADO: applyForce([0,0,100],[1,0,0]) -> torque [0,100,~0] (F×r),
+    integrateVelocities(1) -> linVel z ~0.1, angVel y ~0.01 (m=1000,
+    inertiaScale=0.1) OK.
+[x] 5.2  Atmosfera ISA (densidad, presion, temperatura)
+    -> src/aircraft/atmosphere.js : createAtmosphere(), msToMach/machToMs
+       standalone, tasToIas()
+    PROBADO: SL rho=1.2250 (esperado 1.225), 3000m rho=0.9090 (esperado
+    0.909), 11000m rho=0.3637 T=-56.5C (esperado 0.364 / -56.5) OK.
+[x] 5.3  Motores y empuje
+    -> src/aircraft/engines.js : updateEngines() (RPM/spool/reverse/
+       contrails, una vez por frame), applyEngineForces() (por subpaso)
+[x] 5.4  Perfiles aerodinamicos (tres modelos de sustentacion)
+    -> src/aircraft/airfoils.js : applyAirfoils() — rama A (span,
+       lifting-line eliptica), rama B (area, superficie simple), rama C
+       (factores empiricos liftFactor/dragFactor)
+[x] 5.5  Perdida (stall)
+    -> src/aircraft/airfoils.js : misma funcion, escalado de CL/kL por
+       stallIncidence/zeroLiftIncidence en las tres ramas
+[x] 5.6  Arrastre parasito
+    -> src/aircraft/airfoils.js : applyAirfoils(), fuerza en el CG
+       opuesta a airVelocityDirection (dragCoefficient o dragFactor)
+[~] 5.7  Propwash, viento, turbulencia, termicas
+    -> src/aircraft/airfoils.js : aplicado dentro de applyAirfoils()
+       (propwash del motor, resta de currentWindVector y thermals,
+       suma de getLocalTurbulence). Los GENERADORES de viento/termica/
+       turbulencia en si (weather.currentWindVector, thermals, ruido de
+       turbulencia) son PARTE 8 (clima) y siguen pendientes; aqui solo
+       se consumen como inputs inyectados.
+[x] 5.8  Globos y empuje hidrostatico
+    -> src/aircraft/balloons.js : updateBalloons() (temperatura del
+       envelope, empuje por diferencia de densidad), applyBalloonForces()
+[x] 5.9  Subpasos de fisica (split dt)
+    -> src/aircraft/flight-tick.js : makeFlightTick() (flight.tick con
+       nSub clampeado 1-10, orden motores/globos/airfoils/gravedad/
+       contactos/integracion), makeSetAnimationValues() (v.ktas, v.kias,
+       v.mach, v.loadFactor, v.slipball, v.stalling, etc.)
+    PROBADO: applyAirfoils() con ala de ejemplo (span 5.5, chord 1.47,
+    area 8.1) a 40 m/s produce lift de orden ~1600 N sin crashear
+    (mock de RigidBody + Object3D + weather).
+[x] 5.10 Definicion JSON de una aeronave
+    -> src/aircraft/definitions/trainer-172.json (Trainer 172 completo:
+       fuselaje, alas con stall, hStab/vStab, motor, 3 ruedas con
+       suspension)
+    PROBADO: JSON.parse() sin errores.
+
+  NOTA: igual que PARTE 4, estos modulos reciben sus dependencias (rigidBody,
+  weather, controls, animation, Object3D, sim, collectContacts/resolveContacts
+  de PARTE 4, autopilot) INYECTADAS por parametro, para poder probarlas con
+  mocks. flight-tick.js las ensambla; PARTE 10 (loop principal) es quien
+  las conecta todas al objeto `flight` real con Cesium de verdad.
+
+--------------------------------------------------------------------------------
+PARTE 6 — NUBES  (CRITICO)
+--------------------------------------------------------------------------------
+[x] 6.1  Geometria esferica de la capa de nubes (dos sistemas: billboards
+         SISTEMA A y volumetricas SISTEMA B, ambos leen weather.definition)
+    -> src/clouds/constants.js : ATMOSPHERE_DEFAULTS, CLOUD_LAYER_DEFAULTS
+    -> src/clouds/geometry.js : computeCloudLayerRadii(), raySphereIntersect()
+       (version JS, para tests/CloudManager), cloudMarchRange()
+    -> src/clouds/shaders/atmosphere-common.glsl : raySphereIntersect() GLSL
+    PROBADO: raySphereIntersect([0,0,0],[1,0,0],5) -> [-5,5]; desde fuera
+    [-10,0,0] -> [5,15]; computeCloudLayerRadii da radios base/techo
+    coherentes; cloudMarchRange devuelve null cuando el rayo no puede
+    tocar la capa (mirando hacia el lado contrario) OK.
+[x] 6.2  Densidad procedural (noise 3D + tipos: cumulus/stratocumulus/
+         cumulonimbus segun shapeHeight y perfil vertical)
+    -> src/clouds/shaders/atmosphere-common.glsl : hash(), noise(),
+       cloudDensity() (incluye bloque REALTIME_CLOUDS opcional, 6.9)
+[x] 6.3  Ray marching adaptativo (paso largo hasta hit, retrocede, paso
+         corto con histeresis de salida; Beer-Lambert, iluminacion local
+         por gradiente de densidad, atmosfera solo hasta 1a nube)
+    -> src/clouds/shaders/volumetric-clouds.glsl : calculate_clouds()
+[x] 6.4  Niveles de calidad del march (0-7: pasos, LOD, march step,
+         distance quality ratio, sombras on/off)
+    -> src/clouds/constants.js : CLOUD_QUALITY_LEVELS, buildShaderDefines(),
+       cloudsTextureScale(), blurStepSize()
+    PROBADO: buildShaderDefines(quality=4) genera el bloque de #define
+    esperado; cloudsTextureScale(4)=0.48, blurStepSize(4)=2 OK.
+[x] 6.5  Scattering (Schlick silver-lining + isotropico ambiente) y
+         sombras de nubes sobre el suelo
+    -> src/clouds/shaders/atmosphere-common.glsl : Schlick(), isotropic(),
+       HenyeyGreenstein() (reservado para PARTE 7)
+    -> src/clouds/shaders/composite.glsl : bloque CLOUD_SHADOWS (sample
+       unico de densidad hacia el sol, mask con piso 0.2)
+[x] 6.6  Composite: fog volumetrico, sombra de nube, atmosfera Rayleigh/
+         Mie (hook a PARTE 7), textura de nubes volumetricas, tone mapping
+    -> src/clouds/shaders/composite.glsl : main() completo
+[x] 6.7  Cableado Cesium PostProcessStage (crear/actualizar/destruir
+         stages, recalculo de radio de planeta cada segundo)
+    -> src/clouds/atmosphere-stage.js : createCloudAtmosphere() ->
+       fx.atmosphere.{create, update, setConditions, setVolumetricFog,
+       setFogDensity, addPostProcessingStage, destroy}
+[x] 6.8  CloudManager (billboards SISTEMA A, overcast/CloudCover, brillo
+         bajo nubes, bitmask de situacion de vuelo respecto a la capa)
+    -> src/clouds/cloud-manager.js : createCloudManager() -> Cloud,
+       CloudCover, cloudManager.{init, setCloudCover, spawnClouds, update}
+    PROBADO (mocks de api/fx/weather): setCloudCover(30) ->
+    maxNumberOfClouds=450 (30*15) OK; spawnClouds() puebla 450 nubes;
+    setCloudCover(100) crea fullCover; update() por debajo/encima de la
+    capa alterna enableShadows/disableShadows sin crashear.
+[x] 6.9  Cobertura en tiempo real (textura satelital)
+    -> src/clouds/realtime-coverage.js : realtimeCloudTextureUrl(),
+       refreshRealtimeCoverage(); consumido en atmosphere-stage.js
+       (fx.atmosphere.create con realtime=true) y en cloudDensity()
+       (bloque #ifdef REALTIME_CLOUDS)
+[x] 6.10 Checklist de verificacion de nubes (documentacion, pruebas
+         manuales en la app real — no automatizable sin Cesium+GPU)
+    -> docs/part6-verification-checklist.txt
+
+  NOTA: igual que PARTE 4/5, el JS de PARTE 6 recibe sus dependencias
+  (aircraft, weather, fx, api, camera, enableShadows/disableShadows)
+  INYECTADAS por parametro. Los shaders (.glsl) son texto plano que
+  atmosphere-stage.js concatena con los #define de calidad/flags antes de
+  pasarlos a Cesium.PostProcessStage; no se pueden compilar sin una GPU
+  real, asi que la verificacion de shaders es SOLO estructural aqui
+  (parentesis/llaves balanceados, nombres de uniforms consistentes con
+  lo que sube atmosphere-stage.js) — la verificacion visual real queda
+  en docs/part6-verification-checklist.txt para cuando se integre con
+  Cesium en PARTE 12.
+
+--------------------------------------------------------------------------------
+PARTE 7 — Atmosfera Rayleigh / Mie
+--------------------------------------------------------------------------------
+[x] 7.1  calculate_scattering() (integrador de dos componentes: Rayleigh
+         RGB + Mie con lobulo Henyey-Greenstein/asimetria hacia adelante)
+    -> src/clouds/shaders/atmosphere-common.glsl : bloque "PARTE 7" al
+       final del archivo (constantes light_intensity/beta_ray/beta_mie/
+       beta_ambient/atmosphere_g/height_ray/height_mie/density_multiplier
+       + funcion calculate_scattering(start, dir, maxDistance, light_dir))
+
+  NOTA DE UBICACION: la funcion se agrego a atmosphere-common.glsl (no a
+  un archivo nuevo) porque los DOS consumidores existentes se concatenan
+  como `defines + common + <FS especifico>` (ver atmosphere-stage.js):
+  composite.glsl la llama bajo #ifdef ADVANCED_ATMOSPHERE, y
+  volumetric-clouds.glsl la llama SIN guardar (linea ~135, para integrar
+  la atmosfera solo hasta la primera nube). Por eso queda definida
+  INCONDICIONALMENTE en el comun, no dentro de un #ifdef: si algun dia se
+  arma volumetric=true con advanced=false, cldFS igual la necesita.
+  atmoRadiusSquared/planetRadius (uniforms) y PRIMARY_STEPS/LIGHT_STEPS
+  (#define de calidad) ya estaban subidos por atmosphere-stage.js y
+  constants.js desde PARTE 6; PARTE 7 solo los consume, no los redefine.
+  allow_mie (Mie apagado si el rayo no escapa al espacio, evita el disco
+  solar "pintado" sobre una montana) y el guard d<=0.0->d=1.0 del rayo
+  hacia el sol (evita la raya negra de NaN en el amanecer/atardecer)
+  quedan explicados inline como pedia el tutorial.
+  PROBADO (estructural, sin GPU): parentesis/llaves/corchetes balanceados
+  en atmosphere-common.glsl, composite.glsl y volumetric-clouds.glsl
+  despues del cambio; los simbolos atmoRadiusSquared, planetRadius,
+  PRIMARY_STEPS y LIGHT_STEPS usados en el nuevo bloque coinciden
+  exactamente con los nombres subidos desde atmosphere-stage.js y los
+  #define generados por buildShaderDefines() en constants.js. La
+  verificacion VISUAL real (curvatura de horizonte, degrade de atardecer,
+  ausencia de raya negra en dusk) queda para PARTE 12 (Cesium + GPU).
+
+--------------------------------------------------------------------------------
+PARTE 8 — Clima, viento orografico, termicas, precipitacion
+--------------------------------------------------------------------------------
+[x] 8.0  Valores por defecto del clima (weather.defaults)
+    -> src/weather/constants.js : WEATHER_DEFAULTS
+[x] 8.1  Viento en capas (Wind, viento orografico via computeTerrainLift,
+         weather.initWind, weather.updateWind por frame)
+    -> src/weather/wind.js : createWindSystem() -> Wind,
+       weather.{initWind, updateWind}
+    DESVIACION DOCUMENTADA: computeTerrainLift() del tutorial llama
+    api.getGroundAltitude(upwind, Wind) pasando la CLASE Wind como ctx;
+    getGroundAltitude espera un ctx de ESTADO persistente por punto de
+    muestreo (lastGroundAltitude/wrongAltitudeTries, ver PARTE 4.3), no
+    una funcion constructora. Se interpreta como artefacto de copiar/
+    pegar del tutorial y se reemplaza por this._terrainLiftCtx (un ctx
+    real por instancia de Wind) — ver comentario extenso al inicio de
+    wind.js. weather.updateWind(lla) (elegir la capa activa por
+    floor<=altitud cada frame) no estaba escrito como funcion en el
+    tutorial, solo descrito en prosa ("Cada frame se elige la capa cuya
+    floor <= altitud"); se agrego como funcion real.
+[x] 8.2  Turbulencia y termicas (ruido Perlin 2D compartido,
+         weather.getLocalTurbulence, weather.getLocalThermal)
+    -> src/weather/turbulence.js : attachPerlin(), attachTurbulenceAndThermals()
+    NOTA: weather.atmosphericDisturbanceScale no traia un numero en el
+    tutorial (queda como "config externa"); se fijo un default (2000)
+    documentado inline, ajustable sin tocar la formula.
+[x] 8.3  Dia / noche (fx.dayNightManager)
+    -> src/weather/day-night.js : createDayNightManager()
+    NOTA: el tutorial dejaba esta seccion en pseudocodigo (comentarios
+    tipo "// Mezcla paletas de 8 colores dia/noche segun a" sin la mezcla
+    en si). Se implemento una mezcla real de 8 stops de color (dia claro
+    -> atardecer -> noche cerrada) y el ramp de brillo de nubes
+    [0,0,0,0.5,1,1] del tutorial como funcion de interpolacion real
+    (cloudsBrightnessRamp), en vez de dejarlos sin codigo. Ver comentario
+    extenso al inicio de day-night.js con el detalle de cada decision.
+[x] 8.4  Ensamblado (createWeather) — arma weather.definition + perlin +
+         turbulencia/termicas + viento en un solo objeto `weather`, el
+         mismo que PARTE 5.7 (airfoils.js) y PARTE 6 (CloudManager,
+         atmosphere-stage.js) ya esperaban recibir inyectado.
+    -> src/weather/weather.js : createWeather(), re-exporta
+       createDayNightManager()
+
+    PROBADO (mocks de api/sim/camera/Cesium/animation/aircraft, sin
+    Cesium real):
+    - attachPerlin(): grilla de gradientes se genera sin crashear;
+      perlin.get() da 0 exacto SOLO cuando el punto de muestreo cae
+      justo en una interseccion de grilla (artefacto esperado de un
+      value-noise bilineal, no un bug — confirmado con puntos no
+      alineados a la grilla, que dan valores no nulos tipo -0.42, 0.35).
+    - getLocalTurbulence(): 0 con dial turbulences=0; no-cero con
+      dial=0.5 en un punto no degenerado.
+    - getLocalThermal(): 0 con dial thermals=0 (corta antes); con
+      thermals=0.6 el clamp(...,minspeed=0,maxspeed) descarta las
+      regiones de ruido negativo (nunca hay "termica negativa"/sink en
+      este modelo, solo ascendencia o cero) — verificado que un n negativo
+      da 0 y un n positivo da un valor entre 0 y maxspeed, igual que la
+      formula original.
+    - initWind(270, 10): genera 3 capas (windLayerNb), capa 0 con
+      direction=90 (FROM 270 -> TO 90, este) y vector=[1,0,0] OK.
+      updateWind() setea currentWindVector/currentWindSpeed sin crashear;
+      con speedMs=0 no genera capas extra y currentWindVector queda en
+      [0,0,0] sin division por cero ni NaN.
+    - computeTerrainLift(): con terreno plano da vector de viento sin
+      tilt (Z~0); con una pendiente real 100 m a barlovento del punto de
+      muestreo, produce un vector con componente Z distinta de cero
+      (confirma que V3.rotate() con vectorCross esta orientado y que el
+      angulo escala con la pendiente), sin crashear ni devolver NaN.
+    - createDayNightManager().update(): con sol y camara mockeados no
+      crashea, escribe fx.sunDotNormal y fx.atmosphere.color, calcula
+      sim.isNight; timeRatio(12)=0 (mediodia) y timeRatio(0)=1
+      (medianoche) OK.
+    La verificacion EN VIVO (viento realista contra METAR real, vuelo de
+    ladera contra un acantilado real de Cesium, curva de dia/noche visual)
+    queda para PARTE 12 (no automatizable sin Cesium + un vuelo real).
+
+--------------------------------------------------------------------------------
+PARTE 9 — Aeronave como arbol de partes (Object3D)
+--------------------------------------------------------------------------------
+[x] 9.1  Clase Object3D (nodo de escena propio: position/rotation local,
+         _rotation mundo, points, collisionPoints, hijos, modelo glTF
+         opcional)
+    -> src/core/object3d.js : Object3D, .compute(), .getWorldFrame(),
+       .rotateInitialRotation(), .resetRotationMatrix()
+
+    DESVIACIONES DOCUMENTADAS (las 4 explicadas en el comentario de
+    cabecera de object3d.js):
+    1) `worldRotation`: alias publico de `_rotation`, seteado en cada
+       compute(). airfoils.js (PARTE 5.4, ya entregado) hace
+       `aircraft.object3d.worldRotation[1]` sin que el tutorial lo
+       definiera nunca — sin esto PARTE 5 rompe con undefined.
+    2) `setVectorWorldPosition(v)`: collision-response.js (PARTE 4.8, ya
+       entregado) hace `aircraft.object3d.setVectorWorldPosition(part.dragVector)`
+       + lee `part.dragVector.worldPosition` — mismo metodo que faltaba.
+    3) `Object3D.utilities.getPointLla(point, refLla)`: airfoils.js ya la
+       llama para samplear turbulencia en la posicion real del ala.
+       Factoriza el patron V3.add(refLla, xyz2lla_fast(...)) que PARTE
+       4.7 ya repite inline.
+    4) IMPORTANTE — compute() SUMA this.worldPosition al transformar cada
+       punto/collisionPoint; el codigo literal del tutorial NO lo suma
+       (`p.worldPosition = M33.transform(this._rotation, [p...])` a
+       secas). Sin la suma, cualquier punto de CUALQUIER parte que no
+       sea la raiz (ruedas, alas, motor) queda mal ubicado — pegado cerca
+       del CG en vez de en su posicion real —, lo cual es inconsistente
+       con como aircraft/definitions/trainer-172.json (PARTE 5, ya
+       entregado) declara sus points/collisionPoints (offsets CHICOS
+       relativos al origen de CADA parte, ej. la rueda izquierda tiene
+       position=[-1.15,0.15,-1.05] Y ADEMAS collisionPoints=[[0,0,-0.15]]
+       por separado). Esto rompe SILENCIOSAMENTE el lift (PARTE 5.4) y
+       las colisiones de tren (PARTE 4.7/4.8) sin ningun error ni NaN —
+       la fisica simplemente queda mal, todos los puntos "pegados" al CG.
+       Se corrige sumando this.worldPosition, el mismo patron que el
+       propio tutorial usa 2 lineas arriba para el worldPosition DEL
+       NODO. Para la raiz (worldPosition=[0,0,0]) el resultado es
+       identico al original — el fix es un no-op ahi, coincide con el
+       tutorial en el unico caso donde el tutorial no tenia ambiguedad.
+
+[x] 9.2  Ensamblado del arbol desde el JSON de la aeronave
+         (aircraft.definition.parts, con `parent` por nombre de string)
+    -> src/aircraft/aircraft-tree.js : buildAircraftTree(aircraft, api)
+    El tutorial da la CLASE Object3D pero no el codigo que recorre el
+    JSON plano y arma el arbol real — esto era necesario para que
+    aircraft.object3d, aircraft.parts, aircraft.airfoils/.engines/
+    .balloons/.suspensions (que PARTE 4 y PARTE 5, ya entregadas, ya dan
+    por hecho que existen) existan de verdad. Requiere llamarse DESPUES
+    de initAircraftCollisionPoints() (PARTE 4.6): mismo array de
+    collisionPoints, mismas referencias (ver "PROBADO" abajo).
+    Si el JSON de una aeronave no tiene exactamente una parte sin
+    `parent` (la raiz), lanza un Error explicito en vez de fallar en
+    silencio con aircraft.object3d apuntando a cualquier cosa.
+
+[x] 9.3  Animaciones de partes (applyPartAnimation / updatePartAnimations)
+    -> src/aircraft/aircraft-tree.js
+    Transcrito del tutorial (rota _localRotation ANTES de compute() segun
+    animation.filter(a) para cada entrada `{type:"rotate",axis,value,ratio}`
+    de part.animations). animation.filter() es una dependencia INYECTADA
+    (PARTE 10, loop principal), no algo que este modulo defina.
+    INTEGRACION: flight-tick.js (PARTE 5.6, ya entregado) NO llamaba esto
+    antes de ac.object3d.compute() — se agrego la llamada
+    (updatePartAnimations(ac, animation)) justo antes de compute(), tal
+    como pide el tutorial ("las animaciones modifican _localRotation
+    ANTES de compute"). Ver el diff en flight-tick.js y su comentario de
+    cabecera actualizado (paso 8 nuevo en la lista de orden del subpaso).
+
+[x] 9.4  aircraft.placeParts(subset) — posiciona los modelos glTF de cada
+         parte (api.Model, mismo patron que Shadow en ground-shadow.js
+         PARTE 4.11) segun el Object3D ya computado ese frame
+    -> src/aircraft/aircraft-tree.js : attachPlaceParts(aircraft)
+    flight-tick.js ya llama `ac.placeParts()` (todas las partes, fin de
+    frame) y contact-detection.js ya llama
+    `aircraft.placeParts({ [part.name]: part })` (una sola parte, para
+    animar el piston del tren dentro del subpaso sin esperar al fin de
+    frame) — por eso `subset` acepta un diccionario nombre->parte, no un
+    array, igual que aircraft.parts.
+
+    FUERA DE ALCANCE DE PARTE 9 (marcado para no perderlo): engines.js ya
+    usa `aircraft.engine.on/rpm/startup/invRPMRange` como un objeto de
+    ESTADO SINGULAR del avion (no por-motor); ese estado no es parte del
+    arbol Object3D y el tutorial no lo construye en PARTE 9 — se revisa
+    cuando aparezca la parte que instancia aircraft.rigidBody/aircraft.engine
+    (probablemente el loop principal, PARTE 10).
+
+    PROBADO (mocks de api.Model, sin Cesium; JSON REAL de
+    trainer-172.json, no un mock reducido):
+    - buildAircraftTree() sobre trainer-172.json: 9 partes, arbol con
+      "root" como unica raiz, 4 airfoils, 1 engine, 3 suspensions
+      detectadas correctamente por tipo/propiedad.
+    - Identidad de referencia CONFIRMADA: cada elemento de
+      aircraft.collisionPoints (la lista plana que arma PARTE 4.6) es
+      literalmente el mismo array (===) que aparece en
+      part.collisionPoints — un solo compute() actualiza ambos lados a
+      la vez.
+    - compute() con una rotacion de animacion de prueba (roll alerones):
+      la MATRIZ de leftWing.getWorldFrame() cambia con la animacion (se
+      verifico visualmente que ya no es la identidad); el punto
+      forceSourcePoint del ala queda en un worldPosition fisicamente
+      sensato (-2.6 m en X: -0.4 de la posicion del ala + -2.2 del punto
+      local, con Y/Z sin cambios porque la rotacion de prueba fue
+      alrededor de X).
+      collisionPoints de leftWheel: worldPosition = [-1.15, 0.15, -1.2]
+      (posicion del ala/rueda + su propio punto local -0.15 en Z) — antes
+      del fix de la nota (4) esto habria dado ~[0,0,-0.15], pegado al CG,
+      confirmando que el fix era necesario y no cosmetico.
+    - worldRotation === _rotation despues de compute(): OK.
+    - setVectorWorldPosition(v) y Object3D.utilities.getPointLla(): no
+      crashean, devuelven vectores/LLA con la forma esperada.
+    - placeParts() (todas las partes) y placeParts({root: ...}) (subset)
+      llaman setPositionOrientationAndScale del mock exactamente una vez
+      cada uno, sin crashear, con lla/htr/scale con la forma esperada.
+    - Error explicito si el JSON no tiene raiz o tiene parent invalido
+      (no se probo en vivo — es un throw simple, revisado por lectura).
+    La verificacion EN VIVO (modelo glTF real posicionado en Cesium,
+    tren de aterrizaje tocando el suelo real, alerones visualmente
+    rotando) queda para PARTE 12.
+
+--------------------------------------------------------------------------------
+PARTE 10 — Loop principal, camara, controles, instrumentos
+--------------------------------------------------------------------------------
+[x] 10.0  animation.values / animation.filter(a) — puente entre
+          controles/fisica e instrumentos/animaciones de partes
+    -> src/app/animation.js : createAnimation()
+    NOTA: PARTE 5.3 (engines.js) y PARTE 9 (aircraft-tree.js) ya usaban
+    `animation.filter(a)` como dependencia inyectada sin que el tutorial
+    la definiera nunca. Se completa como lookup directo de
+    animation.values[a.value], dejado como punto de extension para
+    suavizado por-animacion si hace falta mas adelante.
+
+[x] 10.1  Controles (controls.update + mapeo de teclado)
+    -> src/app/controls.js : createControls(), attachKeyboardControls()
+    controls.update() es transcripcion literal del tutorial (recentrado
+    roll/yaw, mezcla yaw->steering, flaps/gear/airbrakes hacia target).
+    El tutorial da la tabla de teclado SOLO EN PROSA (W/S pitch, A/D
+    roll, etc.) sin codigo; attachKeyboardControls() la implementa con
+    keydown/keyup reales, documentado como completado-no-transcrito.
+    Gear/flaps son toggle-en-keydown; pitch/roll/yaw/throttle son
+    mantener-tecla con controls.keyboard.* como estado intermedio.
+
+[x] 10.2  Camara (follow, cockpit, avoidGround, ciclo de camara, orbita
+          de mouse)
+    -> src/app/camera.js : createCamera(), attachMouseOrbit()
+    camera.update() modo "follow" y camera.avoidGround() son
+    transcripcion literal del tutorial. DESVIACION DOCUMENTADA: el
+    codigo del tutorial usa `def.position`/`def.orientations.current`/
+    `def.offsets.current`, pero trainer-172.json (PARTE 5, ya entregado)
+    solo declara `follow: {distance, orientation}` (singular, sin
+    position/offsets) — buildCameraDefinition() normaliza cada entrada
+    de aircraft.definition.cameras al shape que el update() del tutorial
+    espera (orientations.base/current, offsets.base/current, position
+    default [0,0,0]).
+    COMPLETADO (no transcrito, el tutorial no da codigo): modo "cockpit"
+    (camara rigida sin lag, pegada a aircraft.object3d.getWorldFrame()
+    en def.position), cycleCamera() (tecla C, solo mencionada en la
+    tabla), attachMouseOrbit() ("en chase/free el raton orbita, en
+    cockpit mira alrededor" — una frase sin codigo en el tutorial).
+
+[x] 10.3  Inicializar el globo (Cesium.Viewer, render loop propio)
+    -> src/app/world-init.js : initWorld()
+    Transcripcion literal, con inyeccion de {api, sim, Cesium,
+    initTerrain, SRTM_URL} en vez de globals. Requiere que
+    api.frameCallbackWrapper ya exista ANTES de llamarlo (lo define
+    createMainLoop(), ver 10.4) — orden de arranque en PARTE 12.
+
+[x] 10.4  Loop principal (api.frameCallbackWrapper)
+    -> src/app/main-loop.js : createMainLoop()
+    El tutorial titula la seccion "Loop principal..." pero solo da el
+    render loop desacoplado de 10.3 y MENCIONA
+    `viewer.scene.preRender.addEventListener(api.frameCallbackWrapper)`
+    sin definir esa funcion en ningun lado. Se completa aca: cada frame,
+    en orden, controls.update(dt) -> flight.terrainElevationManagement(ac)
+    (TIENE que ir antes del tick: fija sim.withinCollisionRange que
+    collectContacts y Wind.computeTerrainLift ya leen) ->
+    flightTick(dt,dtMs,now) (PARTE 5.6) -> camera.update(dt) ->
+    weather.updateWind(lla) (PARTE 8.1) -> dayNightManager.update()
+    (PARTE 8.3) -> scene.requestRender() ("triggerExplicitRendering() al
+    final del frame", nota de PARTE 10.3). dt medido con performance.now()
+    y clampeado a 0.25s (evita que un tab en background le pase un dt de
+    varios segundos a la fisica al volver a foco). Tambien agrega
+    doPause(n)/undoPause(n) con CONTADOR de referencias (no un booleano
+    plano): makeFlyTo (PARTE 4.10, ya entregado) ya llama
+    doPause(1)/undoPause(1) alrededor del teletransporte async, y un
+    booleano simple se pisaria si dos cosas piden pausa a la vez.
+
+    FUERA DE ALCANCE DE PARTE 10 (instrumentos = HUD/paneles visuales):
+    el tutorial titula la seccion incluyendo "instrumentos" pero el
+    unico codigo relacionado es animation.values (PARTE 5.9, ya
+    entregado) + animation.filter (10.0, arriba) — la lectura de esos
+    valores para dibujar agujas/gauges/HUD es una capa de UI/rendering
+    que el tutorial no cubre con codigo en ninguna parte; se deja para
+    quien integre el frontend, animation.values ya expone todo lo
+    necesario (ktas, altitude, heading, rpm, aoa, stalling, etc).
+
+    PROBADO (mocks de api/document/aircraft, sin Cesium real):
+    - animation.filter(): devuelve el valor existente y 0 para claves
+      sin setear (no NaN).
+    - controls: W sostenido sube pitch, soltar decae exponencialmente;
+      D sostenido sube roll, soltar decae cerca de 0; Shift sostenido 1s
+      lleva throttle a 0.6 (0.6 * THROTTLE_RATE=0.6/s * 1s); G invierte
+      gear.target (1->0); F avanza flaps.target (0->1); C dispara el
+      callback de ciclo de camara exactamente una vez, y CERO veces
+      despues de detach() (el listener realmente se remueve).
+    - camera: con 2 definiciones (follow/cockpit) del propio
+      trainer-172.json, cycleCamera() alterna correctamente entre ambas
+      y vuelve a follow al tercer ciclo; ambos modos llaman
+      api.setCameraPositionAndOrientation() con lla/htr con forma
+      valida (3 numeros cada uno) sin crashear; avoidGround() con
+      sim.relativeAltitude=10 (dentro del umbral de 100 m) y una camara
+      0.1 m sobre el groundAltitude mockeado (100) la sube exactamente a
+      groundAltitude+groundAvoidanceMargin=100.5, como pide la formula.
+      attachMouseOrbit(): arrastrar el mouse mueve
+      orientations.current[0]/[1] en la direccion esperada.
+    - main-loop: frameCallbackWrapper() llama terrainElevationManagement
+      y flightTick exactamente una vez por frame y dispara
+      scene.requestRender(); doPause() detiene los ticks (el contador de
+      frames no avanza) y undoPause() los reanuda.
+    La verificacion EN VIVO (Cesium real, input de teclado real en
+    navegador, latencia de camara "se siente bien") queda para PARTE 12.
+
+--------------------------------------------------------------------------------
+PARTE 11 — Agua, estela, deteccion de mar
+--------------------------------------------------------------------------------
+[ ] Pendiente de lectura y construccion
+
+--------------------------------------------------------------------------------
+PARTE 12 — Ensamblado, orden de arranque, checklist de verificacion
+--------------------------------------------------------------------------------
+[ ] Pendiente de lectura y construccion
+
+--------------------------------------------------------------------------------
+APENDICE A — Shaders GLSL completos
+--------------------------------------------------------------------------------
+[ ] Pendiente
+
+--------------------------------------------------------------------------------
+APENDICE B — Avion minimo (JSON + codigo)
+--------------------------------------------------------------------------------
+[ ] Pendiente
+
+--------------------------------------------------------------------------------
+APENDICE C — Trampas y recetas de depuracion
+--------------------------------------------------------------------------------
+[ ] Pendiente
+
+================================================================================
+ARCHIVOS ENTREGADOS HASTA AHORA
+================================================================================
+src/core/constants.js
+src/core/vectors.js
+src/core/coordinates.js
+src/terrain/terrain-provider.js
+src/terrain/ground-sampling.js
+src/terrain/collision-points.js
+src/terrain/contact-detection.js
+src/terrain/collision-response.js
+src/terrain/elevation-management.js
+src/terrain/ground-shadow.js
+docs/part4-verification-checklist.txt
+src/core/rigidbody.js
+src/aircraft/atmosphere.js
+src/aircraft/engines.js
+src/aircraft/airfoils.js
+src/aircraft/balloons.js
+src/aircraft/flight-tick.js
+src/aircraft/definitions/trainer-172.json
+src/clouds/constants.js
+src/clouds/geometry.js
+src/clouds/shaders/atmosphere-common.glsl
+src/clouds/shaders/volumetric-clouds.glsl
+src/clouds/shaders/composite.glsl
+src/clouds/atmosphere-stage.js
+src/clouds/cloud-manager.js
+src/clouds/realtime-coverage.js
+docs/part6-verification-checklist.txt
+src/clouds/shaders/atmosphere-common.glsl (PARTE 7, calculate_scattering
+  agregado al final del archivo ya entregado en PARTE 6)
+src/weather/constants.js
+src/weather/wind.js
+src/weather/turbulence.js
+src/weather/day-night.js
+src/weather/weather.js
+src/core/object3d.js
+src/aircraft/aircraft-tree.js
+src/aircraft/flight-tick.js (PARTE 9, modificado: se agrego la llamada a
+  updatePartAnimations antes de object3d.compute(); archivo ya entregado
+  en PARTE 5)
+src/app/animation.js
+src/app/controls.js
+src/app/camera.js
+src/app/world-init.js
+src/app/main-loop.js
+
+Todos los .js probados con node --input-type=module (pruebas ad-hoc, sin
+Cesium real: las funciones que dependen de Cesium/rigidbody/api reciben
+esos objetos inyectados por parametro; para las pruebas locales se usan
+mocks minimos). Los .glsl solo se verifican estructuralmente (parentesis/
+llaves balanceados) — no hay GPU en este entorno para compilarlos de
+verdad; la verificacion visual queda para PARTE 12.
+
+================================================================================
+PROXIMO LOTE
+================================================================================
+PARTE 10 — LOOP/CAMARA/CONTROLES: COMPLETA (10.0 a 10.4) para lo que el
+tutorial cubre con codigo real o prosa completable. "Instrumentos" del
+titulo de la seccion queda explicitamente fuera de alcance (es UI/HUD,
+sin codigo en el tutorial en ningun lado) — animation.values ya expone
+todo lo que un HUD necesitaria leer.
+
+Continuar con PARTE 11 — AGUA, ESTELA, DETECCION DE MAR:
+  Ultima pieza de gameplay antes del ensamblado final (PARTE 12). El
+  proyecto ya tiene referencias sueltas esperando esto: sim.waterDepth/
+  sim.waveHeight/sim.waveVerticalSpeed (leidos por PARTE 4.7/4.8,
+  contact-detection.js/collision-response.js, para boyancia de floats/
+  cascos), y `api.waterDetection.reset()` (llamado por makeFlyTo, PARTE
+  4.10) sin que el modulo que los produce exista todavia.
+
+RECORDATORIO PARA PARTE 12 (no perderlo): aircraft.engine/aircraft.rigidBody
+como objetos de ESTADO SINGULAR del avion (on/rpm/startup/invRPMRange
+para engine; el RigidBody de core/rigidbody.js para rigidBody) todavia no
+se instancian en ningun lado — no son parte del arbol Object3D (PARTE 9)
+ni del loop (PARTE 10), son parte de "cargar una aeronave nueva", que es
+justo lo que PARTE 12 (orden de arranque) deberia definir.
+================================================================================
