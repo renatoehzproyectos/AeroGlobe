@@ -12,11 +12,31 @@ import { createApp } from './start.js';
 import { attachRenderLayer } from './render-layer.js';
 import { initTerrain } from '../terrain/terrain-provider.js';
 import { attachTouchControls, isTouchDevice } from './touch-controls.js';
+import { attachTeleportUI } from './teleport-ui.js';
 import trainer172 from '../aircraft/definitions/trainer-172.json' with { type: 'json' };
 
 // Cesium se carga como global `Cesium` via <script> en index.html (CDN
 // oficial) -- no via import, para no necesitar un bundler/npm install.
 const Cesium = window.Cesium;
+
+// world-init.js crea el Viewer con imageryProvider:false (a proposito:
+// deja que el integrador elija su capa de imagenes en vez de fijar una)
+// y nada mas la reemplaza -- por eso el globo se veia liso verde
+// (viewer.scene.globe.baseColor, terrain-provider.js lo usa como color
+// de respaldo mientras no hay imagenes). Cesium World Terrain (elevacion,
+// asset 1) YA estaba andando bien; lo que faltaba era la capa de
+// IMAGENES (satelite/aerial, asset por defecto de createWorldImageryAsync).
+// Se agrega aca, en el hook afterInitWorld (mismo lugar que
+// attachRenderLayer), porque recien ahi existe api.viewer.imageryLayers.
+async function addWorldImagery(api, Cesium) {
+  try {
+    const provider = await Cesium.createWorldImageryAsync();
+    api.viewer.imageryLayers.addImageryProvider(provider);
+    api.viewer.scene.requestRender(); // requestRenderMode:true -- forzar un frame
+  } catch (err) {
+    console.error('No se pudo cargar Cesium World Imagery (se mantiene el verde de respaldo):', err);
+  }
+}
 
 async function main() {
   if (!CESIUM_ION_TOKEN || CESIUM_ION_TOKEN === 'PEGA_TU_TOKEN_DE_CESIUM_ION_ACA') {
@@ -59,7 +79,10 @@ async function main() {
     // src/aircraft/definitions/trainer-172.json.
     definitions: { 'trainer-172': trainer172 },
 
-    afterInitWorld: (api) => attachRenderLayer(api, api.viewer, Cesium),
+    afterInitWorld: (api) => {
+      attachRenderLayer(api, api.viewer, Cesium);
+      addWorldImagery(api, Cesium);
+    },
   });
 
   // Coords = [lat, lon, alt, heading, isAbsolute, speedKnots].
@@ -79,6 +102,11 @@ async function main() {
   if (isTouchDevice()) {
     attachTouchControls(app.controls, app.camera, document.getElementById('view3d'));
   }
+
+  // Textbox de teletransporte ("lat, lon" o un nombre de lugar) — util
+  // en desktop y movil por igual, asi que se monta siempre (no solo en
+  // touch como el joystick).
+  attachTeleportUI(app, document.getElementById('view3d'));
 
   console.log('Aeroglobe arrancado. app:', app);
   window.aeroglobe = app; // para poder inspeccionar/debuggear desde la consola
