@@ -29,15 +29,23 @@
 // ============================================================================
 
 import { clamp } from '../core/constants.js';
+import { updateWaterState } from '../water/waves.js';
+import { updateWake } from '../water/wake.js';
 
 const MAX_DT = 0.25; // s: clamp de hitches largos (tab en background, GC, etc)
 
 // deps: { api, sim, aircraft, controls, camera, flight (de
 //   createFlightTerrainManager, PARTE 4.9), flightTick (de
 //   makeFlightTick, PARTE 5.6), dayNightManager (opcional, PARTE 8.3),
-//   weather (opcional, para weather.updateWind por frame, PARTE 8.1) }
+//   weather (opcional, para weather.updateWind por frame, PARTE 8.1),
+//   waterDetection/water (opcionales, PARTE 11.1/11.2 — profundidad de
+//   agua + oleaje por frame), MS_TO_KNOTS (opcional, para la velocidad
+//   que consume la estela, PARTE 11.3) }
 export function createMainLoop(deps) {
-  const { api, sim, aircraft, controls, camera, flight, dayNightManager, weather } = deps;
+  const {
+    api, sim, aircraft, controls, camera, flight, dayNightManager, weather,
+    waterDetection, water, MS_TO_KNOTS,
+  } = deps;
   let flightTick = deps.flightTick; // puede setearse despues via loop.setFlightTick
 
   sim.pause = false;
@@ -70,7 +78,23 @@ export function createMainLoop(deps) {
 
     controls.update(dt);
     flight.terrainElevationManagement(aircraft.instance);
+    // PARTE 11: tiene que correr ANTES de flightTick, mismo motivo que
+    // terrainElevationManagement arriba -- fija sim.waterDepth/waveHeight/
+    // waveVerticalSpeed, que contact-detection.js (PARTE 4.7) y
+    // collision-response.js (PARTE 4.8) leen dentro del subpaso de fisica
+    // de flightTick que corre a continuacion. Requiere sim.groundElevation
+    // ya fresco (lo fija terrainElevationManagement, linea de arriba).
+    if (waterDetection && water) updateWaterState(deps, waterDetection, water, sim, aircraft);
     flightTick(dt, dtMs, now);
+    // PARTE 11.3: DESPUES de flightTick porque necesita aircraft.waterContact,
+    // que solo queda fresco una vez que collectContacts (dentro del subpaso
+    // de flightTick) ya corrio este frame.
+    if (aircraft.instance && aircraft.instance.wakes) {
+      const av = deps.animation && deps.animation.values;
+      const knots = av && av.ktas;
+      const speedMs = (knots || 0) / (MS_TO_KNOTS || 1.94384);
+      updateWake(aircraft.instance, speedMs);
+    }
     camera.update(dt);
     if (weather && weather.updateWind) weather.updateWind(aircraft.instance.llaLocation);
     if (dayNightManager) dayNightManager.update();

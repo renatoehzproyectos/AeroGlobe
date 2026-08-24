@@ -560,27 +560,283 @@ PARTE 10 — Loop principal, camara, controles, instrumentos
 --------------------------------------------------------------------------------
 PARTE 11 — Agua, estela, deteccion de mar
 --------------------------------------------------------------------------------
-[ ] Pendiente de lectura y construccion
+[x] 11.0  Constantes de agua (tile de landuse + oleaje)
+    -> src/water/constants.js : WATER_DEFAULTS, DEFAULT_LANDUSE_SERVER
+    El tutorial no las agrupaba; se centralizan los literales del
+    fragmento (tileSize 256, zoomLevel 11, depthSlope 0.03, depthOffset
+    1.5, amplitud 0.4, frecuencias 6000/6000, fase temporal 1/0.7),
+    mismo patron que weather/constants.js (PARTE 8.0) y
+    clouds/constants.js (PARTE 6.4). LANDUSE_SERVER no estaba definida en
+    ningun lado del tutorial (solo referenciada) — mismo caso que
+    SRTM_URL en PARTE 10.3, se deja como default inyectable.
+
+[x] 11.1  api.waterDetection (profundidad de agua desde tile de landuse)
+    -> src/water/water-detection.js : createWaterDetection()
+    create()/getWaterDepth() transcritos literalmente del tutorial,
+    envueltos en una factory para inyectar {api, sim, Canvas,
+    LANDUSE_SERVER} en vez de globals (mismo patron que TODO el resto
+    del proyecto). reset() esta COMPLETADO: elevation-management.js
+    (PARTE 4.10, ya entregado) ya llama api.waterDetection.reset() desde
+    makeFlyTo pero el tutorial nunca definia ese metodo — invalida el
+    tile cacheado tras un teletransporte.
+
+[x] 11.2  fx.water (oleaje) + ensamblado por frame
+    -> src/water/waves.js : createWaterState(), updateWaterState()
+    getWaveHeight() transcrito literalmente. getWaveVerticalSpeed()
+    esta COMPLETADO (el tutorial no la da): collision-response.js
+    (PARTE 4.8, ya entregado) ya lee sim.waveVerticalSpeed para sumarla
+    a la velocidad relativa del punto de contacto antes de resolver el
+    impulso — se estima por diferencia finita centrada de la misma
+    getWaveHeight (no se duplica la formula derivada a mano). update()/
+    updateWaterState() tambien COMPLETADOS: el tutorial solo dice en
+    prosa "si groundElevation < 0.1 m y hay agua, es mar, podes anadir
+    oleaje" sin escribir el codigo que decide eso frame a frame y puebla
+    sim.waterDepth/waveHeight/waveVerticalSpeed (que contact-detection.js
+    y collision-response.js ya esperaban desde PARTE 4 sin que nada los
+    escribiera).
+
+[x] 11.3  Estela (wake) de flotadores/cascos
+    -> src/water/wake.js : Wake, attachWakes(), updateWake()
+    El tutorial lo describe en una frase sin codigo ("ParticleEmitter
+    anclado al flotador, followPath=true, billboards a lo largo de la
+    trayectoria cuando waterContact"). COMPLETADO entero: Wake envuelve
+    api.ParticleEmitter (mismo patron que Shadow envuelve api.Model en
+    ground-shadow.js, PARTE 4.11); attachWakes() recorre
+    aircraft.collisionPoints (PARTE 4.6) y crea UNA estela por parte
+    distinta con buoyancy>0 (no una por collisionPoint — un flotador con
+    2 puntos de contacto no necesita 2 estelas); updateWake() enciende/
+    apaga la emision segun aircraft.waterContact (ya lo escribe
+    contact-detection.js, PARTE 4.7) y un umbral minimo de velocidad
+    (config, no dado por el tutorial).
+
+[x] 11.4  Integracion en el loop principal
+    -> src/app/main-loop.js : createMainLoop() ahora acepta
+       waterDetection/water/MS_TO_KNOTS opcionales.
+    updateWaterState() se llama ANTES de flightTick (mismo motivo que
+    terrainElevationManagement: fija sim.waterDepth/waveHeight/
+    waveVerticalSpeed que se leen DENTRO del subpaso de fisica);
+    updateWake() se llama DESPUES de flightTick (necesita
+    aircraft.waterContact, que solo queda fresco una vez que
+    collectContacts ya corrio ese frame).
+
+    PROBADO (mocks de api.Canvas/api.ParticleEmitter, sin Cesium real):
+    - waterDetection: primera llamada a getWaterDepth() con tile nuevo
+      devuelve lastDepth (0) sin leer pixeles (tile todavia cargando,
+      igual que el tutorial); segunda llamada con el mismo tile ya
+      "cargado" lee el pixel mockeado (canal B=180) y da depthSlope*180-
+      depthOffset = 3.9 exacto; sim.cautiousWithTerrain=true fuerza
+      depth=0; reset() limpia lastTileURL/tileOrigin/pixelGeographicSize.
+    - waves: getWaveHeight/getWaveVerticalSpeed numericos (no NaN);
+      update() con groundElevation<0.1 y waterDetected=true puebla
+      waveHeight/waveVerticalSpeed no-cero; con groundElevation alto o
+      waterDetected=false deja waterDepth/waveHeight/waveVerticalSpeed
+      en 0 exacto (no NaN/undefined, importante porque contact-
+      detection.js los usa en comparaciones numericas directas).
+      updateWaterState() end-to-end: frame 1 (tile cargando) depth=0,
+      frame 2 depth=3.9 y waterDetected=true, waveHeight ya no-cero ese
+      mismo frame; sin waterDetection (null) deja todo en 0.
+    - wake: attachWakes() sobre 3 collisionPoints (2 de la misma parte +
+      1 de otra) crea exactamente 2 Wake (uno por parte distinta, no por
+      collisionPoint) y 2 ParticleEmitter; updateWake() enciende
+      emitting=true solo con waterContact=true Y speed>minSpeedForWake,
+      lo apaga si falta cualquiera de las dos condiciones.
+    - main-loop integrado: frameCallbackWrapper() con
+      waterDetection+water+animation inyectados deja sim.waterDepth=3.9,
+      sim.waveHeight no-cero y wake.emitting=true tras 2 frames (mock de
+      flightTick que setea aircraft.waterContact=true), sin crashear.
+    La verificacion EN VIVO (tile de landuse real, oleaje visible en
+    Cesium, estela renderizada detras de un hidroavion real) queda para
+    PARTE 12 (no automatizable sin Cesium + GPU + un tile server real).
 
 --------------------------------------------------------------------------------
 PARTE 12 — Ensamblado, orden de arranque, checklist de verificacion
 --------------------------------------------------------------------------------
-[ ] Pendiente de lectura y construccion
+[x] 12.0  Aircraft (la pieza que faltaba desde PARTE 5/9)
+    -> src/aircraft/aircraft.js : Aircraft(coords), .load(), .place(),
+       .reset(), .render()
+    El tutorial nunca escribe esta clase como codigo (solo la nombra en
+    el pseudocodigo de start() y en la lista en prosa "orden de
+    dependencias al cargar un avion": 1.JSON->definition, 2.Object3D
+    tree+glTF, 3.rigidBody.setMassProps, 4.recolectar
+    airfoils/engines/wheels/collisionPoints, 5.place(), 6.onGround o
+    impulso, 7.camera.reset(), 8.undoPause). COMPLETADO entero,
+    ensamblando en ese orden (con 4 antes que 2, ver nota de cabecera:
+    aircraft-tree.js ya documentaba que buildAircraftTree debe correr
+    DESPUES de initAircraftCollisionPoints) todo lo que PARTE 1-11 ya
+    construyo. De paso resuelve el RECORDATORIO que venia arrastrando
+    desde PARTE 9 (aircraft.engine sin instanciar) y dos piezas mas del
+    mismo tipo descubiertas recien al integrar:
+      - aircraft.engine = {on,rpm,startup,invRPMRange} (engines.js,
+        PARTE 5.3, ya lo leia/escribia sin que nada lo hubiera creado).
+      - attachPlaceParts(aircraft) (aircraft-tree.js, PARTE 9.4) —
+        flight-tick.js ya llamaba `ac.placeParts()` y contact-
+        detection.js `aircraft.placeParts({...})` sin que nada la
+        hubiera adjuntado.
+      - place(lla, htr): completado con una decision documentada
+        (resetea _initialRotation a IDENTIDAD antes de rotar, para que
+        cada llamada fije una orientacion ABSOLUTA en vez de acumular
+        drift si se llama mas de una vez — elevation-management.js,
+        PARTE 4.10, ya la llama repetidamente desde makeFlyTo).
+
+[x] 12.1  createApp()/start() — orquestador final
+    -> src/app/start.js
+    Transcripcion del pseudocodigo start()/frameCallback() de PARTE 12,
+    con 4 desviaciones documentadas en la cabecera del archivo (todas
+    justificadas por piezas YA construidas en partes anteriores que el
+    pseudocodigo original no conocia):
+      1) reusa el loop de PARTE 10.4 (createMainLoop, enganchado a
+         viewer.scene.preRender) en vez de un segundo
+         api.addFrameCallback paralelo.
+      2) sim.pauseLevel<3 no se implementa (PARTE 10.4 ya usa un
+         contador simple pausado/no-pausado).
+      3) instruments.update()/audio.update() no se llaman (fuera de
+         alcance, sin codigo en el tutorial — ya establecido en PARTE
+         10).
+      4) ui.init()/readPreferences() son opcionales via deps (no-op si
+         no se pasan).
+
+[x] 12.2  Checklist de verificacion final
+    -> docs/debugging-recipes.md (tabla de sintomas/causas/arreglos del
+       apendice C, con referencia cruzada a donde este proyecto ya
+       construyo cada arreglo)
+
+    PROBADO (integracion completa, sin Cesium/GPU real):
+    - Aircraft.load() contra el trainer-172.json REAL: definition
+      asignada, object3d construido, rigidBody.mass=1100 (desde el
+      JSON), engine.invRPMRange>0, 4 airfoils y 3 suspensiones
+      recolectadas automaticamente (via buildAircraftTree, PARTE 9.2),
+      altitud de spawn en tierra = groundElevation+startAltitude exacto,
+      impulso inicial en spawn aereo = velocidad indicada convertida a
+      m/s (100 kt -> ~51.4 m/s medido en rigidBody.v_linearVelocity),
+      wakes[] adjuntado (vacio en un avion sin flotadores, no crashea).
+    - place(): llamado dos veces con el mismo heading da la MISMA
+      orientacion (no acumula) — verifica que la decision de resetear
+      _initialRotation a identidad es correcta.
+    - reset(): limpia velocidad del rigidBody y groundContact.
+    - createApp().start() CONTRA UN MOCK DE CESIUM propio (Viewer,
+      SkyBox, Cartesian3 con normalize/dot, Cartographic,
+      HeadingPitchRoll, Transforms.headingPitchRollToFixedFrame,
+      Matrix4, PostProcessStage*, etc.) ejecutado end-to-end:
+      start('trainer-172', coords) resuelve sin excepciones y 60 frames
+      consecutivos de api.frameCallbackWrapper() corren sin crashear,
+      con aircraft/camera/weather/dayNightManager/waterDetection/wakes
+      TODOS conectados de verdad (no stubs vacios). Este proceso de
+      integracion encontro y corrigio 6 bugs de wiring reales (no del
+      tutorial, sino de como las piezas ya entregadas se conectan entre
+      si), documentados en el codigo de start.js y aircraft.js:
+        1. flight.probeTerrain no se adjuntaba incondicionalmente
+           (attachCautiousTerrainProbing solo se llamaba si habia
+           `document`, pero probeTerrain() se usa siempre).
+        2. collectContacts/resolveContacts: flight-tick.js los invoca
+           con una firma MAS CORTA que la que esos modulos exportan de
+           verdad — start.js ahora los envuelve para cerrar
+           api/sim/animation y exponer la firma corta.
+        3. makeSetAnimationValues necesitaba mas deps de las que se le
+           pasaban al principio (GRAVITY, METERS_TO_FEET,
+           exponentialSmoothing).
+        4. createAtmosphere(weather) (PARTE 5.2) nunca se llamaba en
+           ningun lado pese a que flight-tick.js/airfoils.js/
+           balloons.js ya leian weather.atmosphere.* desde PARTE 5 —
+           ahora se llama en start() justo despues de createWeather().
+        5. attachPlaceParts(aircraft) (PARTE 9.4): mismo caso, ahora
+           llamado desde Aircraft.load().
+        6. createDayNightManager necesitaba Cesium en sus deps (faltaba
+           en la primera version de start.js) y su `fx` necesitaba ser
+           un objeto MUTABLE compartido (mismo problema de closures que
+           camera.cam, ver nota extensa en start.js) para que
+           deps.initFx() pudiera completarlo mas tarde sin romper la
+           referencia que dayNightManager ya cerro.
+    - debugContacts()/logSubstep() (Apendice C, src/debug/debug-utils.js)
+      corridos contra esa MISMA simulacion en marcha: debugContacts
+      devuelve 7 probes (6 collisionPoints + 1 de suelo) con colores
+      verde/azul correctos (ninguno en contacto en el aire); logSubstep
+      imprime la tabla completa (tas/alt/agl/aoa/n/rho/lift/rpm/stall/
+      contact/cautious/inRange) sin ningun campo undefined/NaN salvo los
+      que son NaN por diseno (ver PARTE 3, V3.normalize([0,0,0]) =
+      [NaN,NaN,NaN], visible solo con el avion completamente detenido en
+      tierra con motor apagado, mismo comportamiento documentado desde
+      PARTE 3, no un bug nuevo).
+    - createAutopilot() (Apendice B) probado por separado: PID.compute
+      respeta clamps de salida e integral (anti-windup); "derivative on
+      measurement" no da kick al cambiar el setPoint (solo al cambiar la
+      medicion); altitude hold converge a trim~0 en el setpoint tras
+      cebar previousInput, y da trim positivo (cabeceo arriba) por
+      debajo del objetivo; heading hold gira en la direccion CORTA
+      (350->10 vira a la derecha, 10->350 vira a la izquierda), no
+      siempre hacia el mismo lado.
+    La verificacion EN VIVO (Cesium+GPU real, un vuelo humano de punta a
+    punta) queda, como en cada parte anterior, fuera de lo automatizable
+    sin ese entorno — pero por primera vez el camino COMPLETO desde
+    createApp() hasta frames de fisica corriendo esta ejercitado de
+    punta a punta con datos reales (JSON de aeronave real, no solo
+    mocks de cada pieza por separado).
 
 --------------------------------------------------------------------------------
 APENDICE A — Shaders GLSL completos
 --------------------------------------------------------------------------------
-[ ] Pendiente
+[x] Verificado por referencia: el apendice es la MISMA
+    atmosphereCommon.glsl que src/clouds/shaders/atmosphere-common.glsl
+    ya implementa completa desde PARTE 6/7 (raySphereIntersect,
+    isotropic, Schlick, HenyeyGreenstein, hash/noise, cloudDensity,
+    calculate_scattering con PRIMARY_STEPS/LIGHT_STEPS, todos presentes
+    y ya probados con node en PARTE 6/7). volumetricCloudsFS.glsl y
+    atmosphereOnlyFS.glsl los remite el propio apendice a PARTE 6.3/6.4/
+    6.6, ya entregadas. Sin cambios necesarios; `reMap()`/`rayleigh()`
+    standalone del apendice no se usan en ningun lado del codigo
+    delivered (la fase de Rayleigh esta inlineada dentro de
+    calculate_scattering, funcionalmente identica) asi que no se
+    agregaron como funciones sueltas sin uso.
 
 --------------------------------------------------------------------------------
-APENDICE B — Avion minimo (JSON + codigo)
+APENDICE B — PID de autopiloto (bonus, no necesario para volar)
 --------------------------------------------------------------------------------
-[ ] Pendiente
+[x] PID (constructor + reset/set/compute): transcripcion literal.
+    -> src/aircraft/autopilot.js
+[x] createAutopilot(): COMPLETADO -- el apendice solo describe en prosa
+    la cadena de 3 PID (altitud->elevatorTrim con PID(0.01,0.0001,0.4)
+    literal del apendice; heading->roll target con PID(0.02,0,0.1)
+    literal; roll->controls.roll con un PID cuyas ganancias NO da el
+    apendice, elegidas aca: kp=0.05/ki=0/kd=0.02). setAltitudeHold(on,
+    targetFt)/setHeadingHold(on,targetDeg) prenden/apagan cada modo por
+    separado, como un AP real de GA. update(dt) (UN argumento, no
+    update(ac,dt) — asi lo llama flight-tick.js: "autopilot {
+    update(subDt) }") lee aircraft.instance por closure.
+    PROBADO: clamps de PID (salida e integral/anti-windup); ausencia de
+    "derivative kick" al cambiar el setPoint; altitude hold converge a
+    ~0 en destino y da trim positivo por debajo del objetivo; heading
+    hold gira siempre por el lado CORTO (350->10 y 10->350 dan signos de
+    roll opuestos, como deben).
 
 --------------------------------------------------------------------------------
 APENDICE C — Trampas y recetas de depuracion
 --------------------------------------------------------------------------------
-[ ] Pendiente
+[x] Tabla de sintomas/causas/arreglos, con referencia cruzada a donde
+    este proyecto ya construyo cada arreglo.
+    -> docs/debugging-recipes.md
+[x] debugContacts(aircraft, sim, debug): transcripcion casi literal
+    (debug.placeProbe es la unica dependencia no definida por el
+    tutorial en ningun lado, tratada igual que api.Model/api.Canvas —
+    opcional, degrada a devolver los probes como datos si no esta).
+    -> src/debug/debug-utils.js
+[x] logSubstep(aircraft, sim, weather): mismo console.table del
+    apendice, con fallbacks `|| 0` documentados para no romper si se
+    llama antes del primer subpaso completo.
+    PROBADO: ambas funciones corridas contra la simulacion real
+    ensamblada en PARTE 12.1 (createApp().start() + varios frames) — ver
+    el detalle en PARTE 12.2 arriba.
+
+--------------------------------------------------------------------------------
+CIERRE DEL TUTORIAL
+--------------------------------------------------------------------------------
+El tutorial completo (PARTE 1 a PARTE 12 + Apendices A/B/C) esta
+transcrito/completado. "El nucleo es tres cosas" (campo de altura +
+solver de contactos; cuerpo rigido con perfiles; cascara de densidad
+procedural con scattering) esta todo construido y probado con mocks en
+Node en cada parte. Lo que queda, como el propio tutorial dice en su
+cierre, es "piel" (instrumentos glass, radio, plan de vuelo, arboles,
+edificios) fuera del alcance de este tutorial, y la verificacion EN VIVO
+contra Cesium+GPU real que ningun test en Node puede reemplazar.
+
 
 ================================================================================
 ARCHIVOS ENTREGADOS HASTA AHORA
@@ -629,6 +885,18 @@ src/app/controls.js
 src/app/camera.js
 src/app/world-init.js
 src/app/main-loop.js
+src/water/constants.js
+src/water/water-detection.js
+src/water/waves.js
+src/water/wake.js
+src/app/main-loop.js (PARTE 11, modificado: se agrego updateWaterState()
+  antes de flightTick y updateWake() despues; archivo ya entregado en
+  PARTE 10)
+src/aircraft/aircraft.js
+src/app/start.js
+src/aircraft/autopilot.js
+src/debug/debug-utils.js
+docs/debugging-recipes.md
 
 Todos los .js probados con node --input-type=module (pruebas ad-hoc, sin
 Cesium real: las funciones que dependen de Cesium/rigidbody/api reciben
@@ -640,24 +908,34 @@ verdad; la verificacion visual queda para PARTE 12.
 ================================================================================
 PROXIMO LOTE
 ================================================================================
-PARTE 10 — LOOP/CAMARA/CONTROLES: COMPLETA (10.0 a 10.4) para lo que el
-tutorial cubre con codigo real o prosa completable. "Instrumentos" del
-titulo de la seccion queda explicitamente fuera de alcance (es UI/HUD,
-sin codigo en el tutorial en ningun lado) — animation.values ya expone
-todo lo que un HUD necesitaria leer.
+TUTORIAL COMPLETO. PARTE 1 a PARTE 12 + Apendices A/B/C entregados y
+probados con mocks en Node (sin Cesium/GPU real, que ningun test en Node
+puede reemplazar).
 
-Continuar con PARTE 11 — AGUA, ESTELA, DETECCION DE MAR:
-  Ultima pieza de gameplay antes del ensamblado final (PARTE 12). El
-  proyecto ya tiene referencias sueltas esperando esto: sim.waterDepth/
-  sim.waveHeight/sim.waveVerticalSpeed (leidos por PARTE 4.7/4.8,
-  contact-detection.js/collision-response.js, para boyancia de floats/
-  cascos), y `api.waterDetection.reset()` (llamado por makeFlyTo, PARTE
-  4.10) sin que el modulo que los produce exista todavia.
+Todos los RECORDATORIOS que venian arrastrando de partes anteriores
+quedaron resueltos en PARTE 12:
+  - aircraft.engine/aircraft.rigidBody: instanciados en Aircraft.load()
+    (src/aircraft/aircraft.js).
+  - attachPlaceParts(aircraft): adjuntado en Aircraft.load().
+  - createAtmosphere(weather): llamado en start() tras createWeather().
+  - orden real de arranque: createMainLoop (necesita existir antes de
+    initWorld) -> initWorld (10.3) -> Aircraft.load (12.0: JSON ->
+    collisionPoints (4.6) -> buildAircraftTree (9.2) -> placeParts
+    (9.4) -> rigidBody.setMassProps (5.1) -> place/onGround -> wakes
+    (11.3)) -> camera.buildDefinitions (10.2) -> weather+atmosphere
+    (8.4+5.2) -> waterDetection+waterState (11.1+11.2) -> fx opcional ->
+    mainLoop.setFlightTick (5.6) -- todo en src/app/start.js.
 
-RECORDATORIO PARA PARTE 12 (no perderlo): aircraft.engine/aircraft.rigidBody
-como objetos de ESTADO SINGULAR del avion (on/rpm/startup/invRPMRange
-para engine; el RigidBody de core/rigidbody.js para rigidBody) todavia no
-se instancian en ningun lado — no son parte del arbol Object3D (PARTE 9)
-ni del loop (PARTE 10), son parte de "cargar una aeronave nueva", que es
-justo lo que PARTE 12 (orden de arranque) deberia definir.
+SI SE QUISIERA CONTINUAR MAS ALLA DEL TUTORIAL (no pedido, fuera de
+alcance segun el propio cierre del tutorial: "el resto es piel"):
+  - Integrar Cesium real (reemplazar los mocks de api.Model/api.Canvas/
+    api.ParticleEmitter/Cesium.* usados en los tests de Node) y verificar
+    visualmente cada item marcado "queda para verificacion EN VIVO" en
+    las partes anteriores.
+  - UI/instrumentos, radio, plan de vuelo, arboles/edificios — todo
+    explícitamente fuera de alcance del tutorial.
+  - Enganchar deps.autopilot (src/aircraft/autopilot.js, Apendice B) a
+    start.js si se quiere autopiloto real en vuelo (hoy queda como deps
+    opcional sin conectar por defecto, ya que el propio apendice lo
+    marca como "bonus, no necesario para volar").
 ================================================================================
