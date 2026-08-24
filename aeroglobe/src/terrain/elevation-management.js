@@ -44,8 +44,16 @@ export function createFlightTerrainManager(api, sim) {
     if (flight.recorder.playing) return;
 
     if (sim.cautiousWithTerrain) {
+      // BUGFIX (encontrado al correr el primer frame real tras spawn,
+      // sim.cautiousWithTerrain empieza en true por PARTE 4.10): esta
+      // rama lee ac.lastLlaLocation, pero ese campo recien se ESCRIBE al
+      // final de esta misma funcion (mas abajo) -- en el primerisimo
+      // frame de vida del avion todavia no existe. `|| lla` usa la
+      // posicion ACTUAL como fallback solo para ese primer frame (dH=0,
+      // sin spike detectado, comportamiento correcto: no hay frame
+      // anterior con el que comparar todavia).
       const prevGround = api.getGroundAltitudeWithObjects(
-        ac.lastLlaLocation, flight.pastAltitudeTestContext
+        ac.lastLlaLocation || lla, flight.pastAltitudeTestContext
       ).location[2];
       const dH = prevGround - flight.elevationAtPreviousLocation;
       const SPIKE = 0.2;

@@ -52,6 +52,11 @@ export function initWorld(deps, containerId) {
   viewer.scene.globe.showWaterEffect = false;
   viewer.scene.preRender.addEventListener(api.frameCallbackWrapper);
 
-  if (initTerrain) initTerrain(viewer, SRTM_URL);
+  // BUGFIX (encontrado al integrar con Cesium real, ver bootstrap.js):
+  // terrain-provider.js exporta `initTerrain(viewer, Cesium, srtmUrl, ...)`
+  // -- CUATRO parametros con Cesium en el medio -- pero esta llamada solo
+  // pasaba (viewer, SRTM_URL), dejando `Cesium` en el lugar de `srtmUrl`
+  // y `srtmUrl` sin usar. Se corrige pasando Cesium explicitamente.
+  if (initTerrain) initTerrain(viewer, Cesium, SRTM_URL);
   return viewer;
 }

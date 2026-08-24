@@ -1,0 +1,20 @@
+Pone tu archivo .glb del avion en esta carpeta con el nombre EXACTO:
+
+    trainer.glb
+
+Es decir, el archivo final debe quedar en:
+
+    aeroglobe/models/trainer.glb
+
+Si preferis otro nombre o subcarpeta, edita el campo "model" de la parte
+"root" en:
+
+    src/aircraft/definitions/trainer-172.json
+
+(linea con "model": "models/trainer.glb")
+
+El modelo se carga UNA sola vez, para toda la aeronave (la parte "root"
+del arbol es la unica con campo "model" en este JSON) — no hace falta un
+glTF separado por ala/cola/rueda, salvo que quieras animarlas por
+separado (en ese caso, agregales "model" a esas partes tambien y el
+motor las coloca automaticamente, ver aircraft-tree.js).

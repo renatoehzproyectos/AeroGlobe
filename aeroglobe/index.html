@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Aeroglobe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- CesiumJS via CDN. Si preferis una version fijada, cambia el numero
+       de version en ambas URLs (JS y CSS) por la que quieras. -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+
+  <style>
+    html, body, #view3d { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  </style>
+</head>
+<body>
+  <div id="view3d"></div>
+
+  <!-- type="module" para poder usar import/export tal cual estan escritos
+       en src/. No hace falta bundler ni npm install: el navegador
+       resuelve los imports relativos solo. -->
+  <script type="module" src="src/app/bootstrap.js"></script>
+</body>
+</html>

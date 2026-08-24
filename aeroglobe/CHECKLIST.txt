@@ -939,3 +939,39 @@ alcance segun el propio cierre del tutorial: "el resto es piel"):
     opcional sin conectar por defecto, ya que el propio apendice lo
     marca como "bonus, no necesario para volar").
 ================================================================================
+
+================================================================================
+BOOTSTRAP EN NAVEGADOR REAL (post-tutorial, a pedido)
+================================================================================
+Agregado para poder "jugarlo" de verdad en un navegador (el tutorial en
+si termina en PARTE 12 + Apendices, todo con pruebas via mocks en Node):
+
+  index.html, config.js, src/app/bootstrap.js, src/app/render-layer.js,
+  models/ (placeholder), README.md
+
+render-layer.js implementa de verdad (contra Cesium.Model/
+Cesium.ParticleSystem/Cesium.Camera) las 4 dependencias que el motor
+esperaba inyectadas sin codigo del tutorial: api.Model, api.Canvas,
+api.ParticleEmitter, api.setCameraPositionAndOrientation.
+
+Al integrar contra ESTE mock de Cesium mas completo (no los stubs
+minimos de cada parte por separado) aparecieron 3 bugs de wiring mas,
+corregidos con comentario "BUGFIX" en el codigo:
+  1. world-init.js: initTerrain(viewer, SRTM_URL) le faltaba pasar
+     Cesium (terrain-provider.js espera 4 args: viewer, Cesium,
+     srtmUrl, ...).
+  2. createGroundAltitudeApi() (PARTE 4.3-4.5) nunca se llamaba en
+     start.js pese a que el motor ya usaba api.getGroundAltitude* desde
+     PARTE 4 -- ahora se llama en start() tras initWorld().
+  3. elevation-management.js leia ac.lastLlaLocation en el primer frame
+     de vida del avion, antes de que la misma funcion lo hubiera escrito
+     nunca -- `|| lla` como fallback para ese primer frame.
+
+PROBADO: 200 frames consecutivos corriendo con createGroundAltitudeApi
+REAL (sin overrides de mock) via un Cesium mock ampliado
+(Cartesian3.normalize/dot, globe.getHeight, imageryLayers.get, etc);
+bootstrap.js probado con window/document mockeados hasta su rama de
+"falta el token" (JSON import assertion + control flow OK). La
+verificacion EN VIVO (Cesium+GPU+glTF reales en un navegador) la hace
+quien provea su propio Cesium ion token y archivo .glb -- ver README.md.
+================================================================================

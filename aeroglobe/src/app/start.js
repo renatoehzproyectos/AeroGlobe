@@ -61,6 +61,7 @@ import { createAnimation } from './animation.js';
 import { createControls, attachKeyboardControls } from './controls.js';
 import { createCamera, attachMouseOrbit } from './camera.js';
 import { initWorld } from './world-init.js';
+import { createGroundAltitudeApi } from '../terrain/ground-sampling.js';
 import { createMainLoop } from './main-loop.js';
 import { createWeather, createDayNightManager } from '../weather/weather.js';
 import { createAtmosphere } from '../aircraft/atmosphere.js';
@@ -146,6 +147,30 @@ export function createApp(deps) {
     // el objeto `camera` ya construido (misma referencia que mainLoop
     // ya tiene cerrada por closure).
     camera.cam = api.camera;
+
+    // createGroundAltitudeApi (PARTE 4.3/4.4/4.5) -- OTRA pieza que el
+    // resto del proyecto ya esperaba (flight.terrainElevationManagement,
+    // makeFlyTo, contact-detection.js, todos llaman
+    // api.getGroundAltitude*/api.getGuarantiedGroundAltitude desde PARTE
+    // 4) sin que nada la hubiera invocado todavia -- mismo patron que
+    // createAtmosphere/attachPlaceParts en PARTE 12.0. Necesita
+    // api.viewer/api.Cesium/api.sim/api.renderingSettings ya listos, por
+    // eso se llama justo aca, DESPUES de initWorld (que puebla
+    // api.viewer) y ANTES de cargar la aeronave (que ya la necesita).
+    api.Cesium = Cesium;
+    api.sim = sim;
+    api.renderingSettings = api.renderingSettings || { physicsDeltaMs: 16 };
+    createGroundAltitudeApi(api);
+
+    // afterInitWorld(api) — hook OPCIONAL para que el integrador cuelgue
+    // dependencias que necesitan api.viewer/api.camera ya existentes
+    // (ej. render-layer.js: api.Model/api.Canvas/api.ParticleEmitter/
+    // setCameraPositionAndOrientation con Cesium real -- ver
+    // src/app/bootstrap.js). No confundir con deps.initFx (paso 8, mas
+    // abajo): este hook corre ANTES de cargar la aeronave (que ya
+    // necesita api.Model para instanciar su glTF).
+    if (deps.afterInitWorld) deps.afterInitWorld(api);
+
     if (api.renderingQuality && deps.preferences) {
       api.renderingQuality(deps.preferences.graphics && deps.preferences.graphics.quality);
     }
