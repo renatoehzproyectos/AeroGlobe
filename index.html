@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Aeroglobe</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 
   <!-- CesiumJS via CDN. Si preferis una version fijada, cambia el numero
        de version en ambas URLs (JS y CSS) por la que quieras. -->
@@ -12,6 +12,11 @@
 
   <style>
     html, body, #view3d { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    /* Movil: evita que gestos de arrastre/pinch sobre el viewport se
+       interpreten como scroll/zoom de la pagina en vez de orbita de
+       camara / controles tactiles (ver camera.js y touch-controls.js). */
+    html, body { overscroll-behavior: none; touch-action: none; }
+    #view3d { touch-action: none; }
   </style>
 </head>
 <body>

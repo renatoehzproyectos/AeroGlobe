@@ -156,15 +156,47 @@ export function createCamera(deps) {
 // No usa Cesium directamente: solo pixeles de movimiento del mouse sobre
 // `el elemento del viewport`.
 // ----------------------------------------------------------------------------
+// NOTA MOBILE: se usan Pointer Events (pointerdown/move/up/cancel) en vez
+// de mouse-only (mousedown/mousemove/mouseup) para que el MISMO codigo
+// orbite la camara con el dedo en touch (movil/tablet) y con el mouse en
+// desktop -- los navegadores mapean touch a eventos "pointer" con
+// pointerType: 'touch' automaticamente, sin listeners separados.
+//
+// touch-action: 'none' en el elemento es NECESARIO en movil: sin eso, el
+// navegador intercepta el gesto de arrastre como scroll/pan de la
+// pagina antes de que lleguen los eventos pointermove aca (por eso "no
+// puedo mover la camara" en el celular incluso con los listeners
+// puestos). Tambien evita el pinch-zoom del navegador sobre el canvas.
+//
+// setPointerCapture asegura que, si el dedo/mouse se desliza fuera del
+// elemento durante el arrastre, se sigan recibiendo los eventos de
+// move/up igual (mouseleave con touch no dispara de forma confiable).
 export function attachMouseOrbit(camera, viewportEl, sensitivity) {
   sensitivity = sensitivity || 0.15; // grados por pixel
   let dragging = false;
+  let activePointerId = null;
   let lastX = 0, lastY = 0;
 
-  function onDown(e) { dragging = true; lastX = e.clientX; lastY = e.clientY; }
-  function onUp() { dragging = false; }
+  viewportEl.style.touchAction = 'none';
+
+  function onDown(e) {
+    // Solo el primer dedo/boton inicia la orbita; ignora multi-touch
+    // (dos dedos se dejan libres para futuros gestos, ej. pinch-zoom).
+    if (dragging) return;
+    dragging = true;
+    activePointerId = e.pointerId;
+    lastX = e.clientX; lastY = e.clientY;
+    if (viewportEl.setPointerCapture) {
+      try { viewportEl.setPointerCapture(e.pointerId); } catch (err) { /* no-op */ }
+    }
+  }
+  function onUp(e) {
+    if (e.pointerId !== activePointerId) return;
+    dragging = false;
+    activePointerId = null;
+  }
   function onMove(e) {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== activePointerId) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     const def = camera.currentDefinition;
@@ -173,15 +205,15 @@ export function attachMouseOrbit(camera, viewportEl, sensitivity) {
     def.orientations.current[1] = clamp((def.orientations.current[1]) + dy * sensitivity, base[1] - 80, base[1] + 80);
   }
 
-  viewportEl.addEventListener('mousedown', onDown);
-  viewportEl.addEventListener('mouseup', onUp);
-  viewportEl.addEventListener('mouseleave', onUp);
-  viewportEl.addEventListener('mousemove', onMove);
+  viewportEl.addEventListener('pointerdown', onDown);
+  viewportEl.addEventListener('pointerup', onUp);
+  viewportEl.addEventListener('pointercancel', onUp);
+  viewportEl.addEventListener('pointermove', onMove);
 
   return function detach() {
-    viewportEl.removeEventListener('mousedown', onDown);
-    viewportEl.removeEventListener('mouseup', onUp);
-    viewportEl.removeEventListener('mouseleave', onUp);
-    viewportEl.removeEventListener('mousemove', onMove);
+    viewportEl.removeEventListener('pointerdown', onDown);
+    viewportEl.removeEventListener('pointerup', onUp);
+    viewportEl.removeEventListener('pointercancel', onUp);
+    viewportEl.removeEventListener('pointermove', onMove);
   };
 }

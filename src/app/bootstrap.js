@@ -11,6 +11,7 @@ import { CESIUM_ION_TOKEN } from '../../config.js';
 import { createApp } from './start.js';
 import { attachRenderLayer } from './render-layer.js';
 import { initTerrain } from '../terrain/terrain-provider.js';
+import { attachTouchControls, isTouchDevice } from './touch-controls.js';
 import trainer172 from '../aircraft/definitions/trainer-172.json' with { type: 'json' };
 
 // Cesium se carga como global `Cesium` via <script> en index.html (CDN
@@ -67,6 +68,17 @@ async function main() {
   // de Palo Alto (PAO), 37.4611 N, -122.1150 W, pista 31 (heading ~310).
   // Cambialo por las coordenadas que quieras.
   await app.start('trainer-172', [37.4611, -122.1150, 0, 310, false, null]);
+
+  // Movil: no hay teclado fisico, asi que controls.js (solo keydown/
+  // keyup) nunca recibiria pitch/roll/yaw/throttle sin esto. Se agrega
+  // una capa de joystick/throttle/botones en pantalla que escribe sobre
+  // los MISMOS ejes que el teclado (ver touch-controls.js) -- el resto
+  // del simulador no distingue el origen. Solo se monta si el
+  // dispositivo reporta soporte touch, para no tapar la pantalla en
+  // desktop.
+  if (isTouchDevice()) {
+    attachTouchControls(app.controls, app.camera, document.getElementById('view3d'));
+  }
 
   console.log('Aeroglobe arrancado. app:', app);
   window.aeroglobe = app; // para poder inspeccionar/debuggear desde la consola
