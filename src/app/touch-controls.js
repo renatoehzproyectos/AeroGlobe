@@ -91,16 +91,19 @@ export function attachTouchControls(controls, camera, containerEl) {
   function clampAxis(v) { return Math.max(-1, Math.min(1, v)); }
 
   stickBase.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
     if (stickPointerId != null) return;
     stickPointerId = e.pointerId;
     stickBase.setPointerCapture(e.pointerId);
     stickMove(e.clientX, e.clientY);
   });
   stickBase.addEventListener('pointermove', (e) => {
+    e.stopPropagation();
     if (e.pointerId !== stickPointerId) return;
     stickMove(e.clientX, e.clientY);
   });
   function stickEnd(e) {
+    e.stopPropagation();
     if (e.pointerId !== stickPointerId) return;
     stickPointerId = null;
     stickReset();
@@ -136,16 +139,19 @@ export function attachTouchControls(controls, camera, containerEl) {
     throttleFill.style.height = `${ratio * (THROTTLE_H - 6)}px`;
   }
   throttleTrack.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
     if (throttlePointerId != null) return;
     throttlePointerId = e.pointerId;
     throttleTrack.setPointerCapture(e.pointerId);
     throttleSetFromY(e.clientY);
   });
   throttleTrack.addEventListener('pointermove', (e) => {
+    e.stopPropagation();
     if (e.pointerId !== throttlePointerId) return;
     throttleSetFromY(e.clientY);
   });
   function throttleEnd(e) {
+    e.stopPropagation();
     if (e.pointerId !== throttlePointerId) return;
     throttlePointerId = null;
     // el throttle se queda donde lo dejaste (como una palanca real),
@@ -160,12 +166,14 @@ export function attachTouchControls(controls, camera, containerEl) {
     btn.textContent = label;
     let pid = null;
     btn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
       pid = e.pointerId;
       btn.setPointerCapture(e.pointerId);
       btn.style.background = 'rgba(120,200,255,0.55)';
       onDown();
     });
     function release(e) {
+      e.stopPropagation();
       if (e.pointerId !== pid) return;
       pid = null;
       btn.style.background = baseButtonStyle.background;
@@ -179,11 +187,19 @@ export function attachTouchControls(controls, camera, containerEl) {
     const btn = makeEl('div', { ...baseButtonStyle, ...style, pointerEvents: 'auto' }, root);
     btn.textContent = label;
     btn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
       btn.setPointerCapture(e.pointerId);
       btn.style.background = 'rgba(120,200,255,0.55)';
     });
-    btn.addEventListener('pointerup', () => { btn.style.background = baseButtonStyle.background; onTap(); });
-    btn.addEventListener('pointercancel', () => { btn.style.background = baseButtonStyle.background; });
+    btn.addEventListener('pointerup', (e) => {
+      e.stopPropagation();
+      btn.style.background = baseButtonStyle.background;
+      onTap();
+    });
+    btn.addEventListener('pointercancel', (e) => {
+      e.stopPropagation();
+      btn.style.background = baseButtonStyle.background;
+    });
     return btn;
   }
 
