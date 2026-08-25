@@ -126,9 +126,22 @@ export function resolveWheelFriction(rb, sim, aircraft, c, v, budget, part, prop
   let fwdScale = 1;
 
   // Rolling vs locked
+  // BUGFIX: por debajo de lockSpeed (0.4 m/s en trainer-172.json -- osea
+  // practicamente siempre que el avion esta detenido en pista) fwdScale
+  // se quedaba en su default de 1: un impulso de friccion a MAXIMA
+  // fuerza, sin acotar por frictionBudget (a diferencia de sideScale un
+  // poco mas abajo, y del caso con freno). Eso cancela el 100% de la
+  // velocidad hacia adelante en CADA subpaso de fisica, sin importar
+  // cuanto empuje haga el motor -- la friccion estatica nunca se podia
+  // "romper", asi que el avion quedaba pegado al piso a throttle maximo
+  // (para siempre, hasta que alguien lo empuje por encima de lockSpeed a
+  // mano). Se acota igual que el resto de los casos: el impulso estatico
+  // no puede superar frictionBudget, asi que el empuje del motor SI
+  // puede vencerlo y arrancar a rodar.
   if (Math.abs(vFwd) > props.lockSpeed) {
     fwdScale = props.rollingFriction; // rueda girando: poca friccion long.
   } else {
+    fwdScale = clamp(budget / (Math.abs(jFwd) * props.frictionCoef || 1), 0, 1);
     c.forwardProjVel = 0;
     c.sideProjVel = 0;
   }
