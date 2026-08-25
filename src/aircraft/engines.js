@@ -45,6 +45,17 @@ export function updateEngines(aircraft, dt, controls, anim, animationFilter, opt
       }
     }
 
+    // BUGFIX: aircraft.engine.on arranca en false (aircraft.js) y nada lo
+    // ponia nunca en true -- no hay tecla/boton de "arrancar motor" en
+    // controls.js/touch-controls.js, asi que el motor se quedaba apagado
+    // para siempre y el throttle (teclado o joystick tactil) no producia
+    // ningun empuje. Se enciende solo al primer input de throttle > 0 y se
+    // apaga si el throttle vuelve a 0 con brakes puestos (freno de
+    // estacionamiento = "apagar motor"), para no necesitar un control de
+    // ignicion aparte que el tutorial nunca definio.
+    if (controls.throttle > 0.001) aircraft.engine.on = true;
+    else if (controls.brakes > 0.5) aircraft.engine.on = false;
+
     if (aircraft.engine.on) {
       let targetRpm = (aircraft.definition.maxRPM - aircraft.definition.minRPM) * throttle
         + aircraft.definition.minRPM;
