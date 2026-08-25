@@ -76,6 +76,12 @@ export function makeFlightTick(aircraft, deps) {
 
       const { contacts, maxPenetration } = collectContacts(ac, subDt);
       if (contacts.length && !flight.skipCollisionResponse) {
+        // BUGFIX: esta rama reimplementa handleContacts() (PARTE 4.7, en
+        // contact-detection.js) en vez de llamarla, y se olvido la linea
+        // que pone aircraft.groundContact = true cuando hay contactos --
+        // por eso el HUD/instrumentos mostraban groundContact:false
+        // permanentemente aun con el avion apoyado en el tren.
+        ac.groundContact = true;
         if (maxPenetration > 0.001 && !sim.cautiousWithTerrain) {
           ac.llaLocation[2] += maxPenetration;
         }

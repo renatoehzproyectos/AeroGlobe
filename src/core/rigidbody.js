@@ -103,6 +103,20 @@ RigidBody.prototype.applyTorqueImpulse = function (angJ) {
 };
 
 RigidBody.prototype.applyImpulse = function (J, r) {
+  // BUGFIX: con 3 ruedas resolviendo friccion/impulsos en secuencia
+  // (Gauss-Seidel, sin solver global), una combinacion inestable de
+  // stiffness/timestep puede producir un impulso puntual no-finito
+  // (NaN/Infinity) en un subpaso. Sin este guard, ese UNICO impulso malo
+  // se escribe en v_linearVelocity/v_angularVelocity y los envenena para
+  // SIEMPRE (NaN se propaga en cualquier operacion futura) -- el avion
+  // queda "congelado" (integrateTransform tambien deja de mover la
+  // posicion porque `NaN > minLinearVelocity` es siempre false). Se
+  // ignora el impulso no-finito (se pierde ese subpaso, no toda la
+  // simulacion) y se avisa por consola para poder rastrear la causa.
+  if (!isFinite(J[0]) || !isFinite(J[1]) || !isFinite(J[2])) {
+    console.warn('[rigidbody] impulso no finito ignorado', J, 'en', r);
+    return;
+  }
   this.applyCentralImpulse(J);
   this.applyTorqueImpulse(V3.cross(J, r));
 };
@@ -120,14 +134,29 @@ RigidBody.prototype.computeJacobian = function (e, relVelN, r, n) {
 };
 
 RigidBody.prototype.integrateVelocities = function (dt) {
-  this.v_linearVelocity = V3.add(
+  const newLinear = V3.add(
     this.v_linearVelocity,
     V3.scale(this.v_totalForce, this.s_inverseMass * dt)
   );
-  this.v_angularVelocity = V3.add(
+  const newAngular = V3.add(
     this.v_angularVelocity,
     M33.multiplyV(this.m_worldInvInertiaTensor, V3.scale(this.v_totalTorque, dt))
   );
+  // Mismo guard que applyImpulse: si v_totalForce/Torque ya viene
+  // envenenado (p.ej. por un impulso no-finito que se colo antes de que
+  // se agregara el guard de arriba, o por una fuerza NaN de otra parte),
+  // no lo integramos -- se descarta el subpaso en vez de dejar el avion
+  // en NaN para siempre.
+  if (isFinite(newLinear[0]) && isFinite(newLinear[1]) && isFinite(newLinear[2])) {
+    this.v_linearVelocity = newLinear;
+  } else {
+    console.warn('[rigidbody] velocidad lineal no finita ignorada', newLinear);
+  }
+  if (isFinite(newAngular[0]) && isFinite(newAngular[1]) && isFinite(newAngular[2])) {
+    this.v_angularVelocity = newAngular;
+  } else {
+    console.warn('[rigidbody] velocidad angular no finita ignorada', newAngular);
+  }
 };
 
 // Escribe llaLocation y rotacion de aircraft.instance. Por debajo del

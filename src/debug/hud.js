@@ -28,6 +28,7 @@ export function attachDebugHud(app, containerEl) {
       `groundSpeed: ${(ac.groundSpeed || 0).toFixed(2)} m/s\n` +
       `velocity xyz: ${(ac.velocity || [0, 0, 0]).map(v => v.toFixed(2)).join(', ')}\n` +
       `groundContact: ${ac.groundContact}\n` +
+      `angVel: ${(ac.rigidBody.v_angularVelocity || [0, 0, 0]).map(v => v.toFixed(3)).join(', ')}\n` +
       `lla: ${ac.llaLocation.map((v, i) => i < 2 ? v.toFixed(6) : v.toFixed(2)).join(', ')}`;
   }, 200);
 
