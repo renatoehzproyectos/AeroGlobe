@@ -13,6 +13,7 @@ import { attachRenderLayer } from './render-layer.js';
 import { initTerrain } from '../terrain/terrain-provider.js';
 import { attachTouchControls, isTouchDevice } from './touch-controls.js';
 import { attachTeleportUI } from './teleport-ui.js';
+import { attachDebugHud } from '../debug/hud.js';
 import trainer172 from '../aircraft/definitions/trainer-172.json' with { type: 'json' };
 
 // Cesium se carga como global `Cesium` via <script> en index.html (CDN
@@ -107,6 +108,11 @@ async function main() {
   // en desktop y movil por igual, asi que se monta siempre (no solo en
   // touch como el joystick).
   attachTeleportUI(app, document.getElementById('view3d'));
+
+  // HUD de diagnostico temporal -- overlay con throttle/rpm/empuje/velocidad
+  // en vivo (ver src/debug/hud.js). Sacalo cuando ya no lo necesites: borra
+  // este bloque y el import de arriba.
+  attachDebugHud(app, document.getElementById('view3d'));
 
   console.log('Aeroglobe arrancado. app:', app);
   window.aeroglobe = app; // para poder inspeccionar/debuggear desde la consola
