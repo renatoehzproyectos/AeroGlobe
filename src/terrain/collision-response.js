@@ -58,23 +58,41 @@ export function resolveContacts(rb, sim, aircraft, contacts, dt) {
     }
 
     if (c.type === 'raycast' || c.type === 'hardpoint') {
-      // F = (k x - c v) * mass * dt   -> impulso de muelle
-      applied = (c.force - part.suspension.damping * vN) * rb.mass * dt;
-      if (applied > 0) rb.applyImpulse(V3.scale(c.normal, applied), cp.worldPosition);
+      // Spring-damper impulse: J = (k x - c v_n) * m * dt
+      // Only the soft suspension path. hardpoint used to ALSO fire the
+      // inelastic impulse below, which double-counted energy and produced
+      // the classic "rebote eterno / explosion to orbit" failure mode.
+      // hardpoint still participates in friction; the hard constraint is
+      // the position correction in handleContacts / flight-tick, not a
+      // second velocity impulse on top of the spring.
+      const raw = (c.force - part.suspension.damping * vN) * rb.mass * dt;
+      // Bound impulse so a single deep-penetration substep cannot launch
+      // the aircraft (~4 g·s soft scale, absolute Δv cap of a few m/s).
+      const maxJ = Math.max(rb.mass * 40 * dt, rb.mass * 2);
+      applied = clamp(raw, -maxJ, maxJ);
+      if (applied !== 0 && isFinite(applied)) {
+        rb.applyImpulse(V3.scale(c.normal, applied), cp.worldPosition);
+      }
     }
 
-    if ((c.type === 'standard' || c.type === 'hardpoint') && vN < 0) {
-      // Restitucion 0: contacto inelastico (el tren ya absorbe)
+    if (c.type === 'standard' && vN < 0) {
+      // Restitution 0: inelastic contact for fuselage / wingtips / prop.
+      // Wheels (raycast/hardpoint) must NOT take this path — the suspension
+      // already dissipates the normal relative velocity.
       const j = rb.computeJacobian(0, vN, cp.worldPosition, c.normal);
-      rb.applyImpulse(V3.scale(c.normal, j), cp.worldPosition);
-      applied = j;
+      const maxJ = Math.max(rb.mass * 40 * dt, rb.mass * 5);
+      const jClamped = clamp(j, -maxJ, maxJ);
+      if (isFinite(jClamped) && jClamped !== 0) {
+        rb.applyImpulse(V3.scale(c.normal, jClamped), cp.worldPosition);
+      }
+      applied = jClamped;
     }
 
     // Friccion de Coulomb: |Jt| <= mu * |Jn|
-    let frictionBudget = applied * props.frictionCoef;
+    let frictionBudget = Math.abs(applied) * props.frictionCoef;
     frictionBudget = clamp(
       frictionBudget,
-      frictionBudget,
+      0,
       2 * rb.mass * dt * props.frictionCoef
     );
 

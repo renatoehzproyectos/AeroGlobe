@@ -121,6 +121,30 @@ RigidBody.prototype.applyImpulse = function (J, r) {
   this.applyTorqueImpulse(V3.cross(J, r));
 };
 
+// Safety net against contact-response energy pumps. GA aircraft never
+// legitimately reach these speeds in this sim; clamping here stops a
+// single bad substep from sending the plane to orbit / Infinity.
+const MAX_LINEAR_SPEED = 400;   // m/s  (~Mach 1.2)
+const MAX_ANGULAR_SPEED = 20;   // rad/s (~1150 deg/s)
+
+RigidBody.prototype.clampVelocities = function () {
+  const v = this.v_linearVelocity;
+  const vLen = V3.length(v);
+  if (vLen > MAX_LINEAR_SPEED) {
+    this.v_linearVelocity = V3.scale(v, MAX_LINEAR_SPEED / vLen);
+  }
+  const w = this.v_angularVelocity;
+  const wLen = V3.length(w);
+  if (wLen > MAX_ANGULAR_SPEED) {
+    this.v_angularVelocity = V3.scale(w, MAX_ANGULAR_SPEED / wLen);
+  }
+  // Kill non-finite states that somehow slipped past applyImpulse.
+  for (let i = 0; i < 3; i++) {
+    if (!isFinite(this.v_linearVelocity[i])) this.v_linearVelocity[i] = 0;
+    if (!isFinite(this.v_angularVelocity[i])) this.v_angularVelocity[i] = 0;
+  }
+};
+
 // j = -(1+e) v_n / (1/m + n . ((I^-1 (r × n)) × r))
 // Usado por collision-response.js (PARTE 4.8) para friccion e impulsos
 // normales; con relVelN = velocidad relativa a lo largo de n, r = punto
@@ -157,6 +181,7 @@ RigidBody.prototype.integrateVelocities = function (dt) {
   } else {
     console.warn('[rigidbody] velocidad angular no finita ignorada', newAngular);
   }
+  this.clampVelocities();
 };
 
 // Escribe llaLocation y rotacion de aircraft.instance. Por debajo del

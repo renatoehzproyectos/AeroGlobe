@@ -159,7 +159,7 @@ export function createApp(deps) {
     // api.viewer) y ANTES de cargar la aeronave (que ya la necesita).
     api.Cesium = Cesium;
     api.sim = sim;
-    api.renderingSettings = api.renderingSettings || { physicsDeltaMs: 16 };
+    api.renderingSettings = api.renderingSettings || { physicsDeltaMs: 10 };
     createGroundAltitudeApi(api);
 
     // afterInitWorld(api) — hook OPCIONAL para que el integrador cuelgue
