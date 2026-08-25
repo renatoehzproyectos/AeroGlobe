@@ -113,6 +113,29 @@ Aircraft.prototype.load = async function (aircraftId, coords, deps) {
       : 0,
   };
 
+  // BUGFIX (el mas grave de todos): elevation-management.js (PARTE 4.9)
+  // decide `sim.withinCollisionRange` con
+  //   `sim.relativeAltitude < ac.boundingSphereRadius + ac.velocityScalar`
+  // pero NADA en todo el proyecto asignaba nunca ac.boundingSphereRadius
+  // -- quedaba `undefined` para siempre. `undefined + numero = NaN`, y
+  // CUALQUIER comparacion con NaN es `false` en JS, asi que
+  // withinCollisionRange nunca fue `true`, ni una vez, desde el primer
+  // frame. collectContacts (PARTE 4.7) toma siempre su salida temprana
+  // (`if (!sim.withinCollisionRange) return`), el avion nunca detecta
+  // contacto con el suelo, y cae en caida libre para siempre (gravedad
+  // sin resistencia). Por eso el avion "no se mueve": no es que no
+  // acelere hacia adelante, es que esta cayendo indefinidamente por
+  // debajo del terreno, invisible, mientras la camara sigue mostrando
+  // el mismo cuadro porque el chase-cam (camera.js) sigue centrada en
+  // el avion. Ademas, una vez la velocidad de caida se vuelve enorme,
+  // termina contaminando otros calculos con NaN (rpm, thrust, etc).
+  // Se agrega aca un boundingSphereRadius razonable (definible en el
+  // JSON del avion via "boundingSphereRadius", con fallback generico)
+  // y se inicializa ac.velocityScalar en 0 (tambien undefined hasta el
+  // primer subpaso de flight.tick, mismo problema en el frame 0).
+  this.boundingSphereRadius = definition.boundingSphereRadius || 8; // m
+  this.velocityScalar = 0;
+
   // --- 5. place(lla, htr) -> compute matrices ----------------------------
   const onGround = coords[2] === 0;
   let alt = coords[2];

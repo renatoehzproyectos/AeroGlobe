@@ -59,7 +59,14 @@ export function buildAircraftTree(aircraft, api) {
     aircraft.parts[part.name] = part;
 
     if (part.type === 'airfoil') aircraft.airfoils.push(part);
-    else if (part.type === 'engine') aircraft.engines.push(part);
+    // BUGFIX: engines.js (PARTE 5.3) hace `eng.rpm += (target - eng.rpm) *
+    // inertia * dt` sobre cada parte motor, pero nada inicializaba
+    // `part.rpm` -- quedaba `undefined`, y `undefined + numero = NaN` en
+    // el primerisimo frame en que el motor esta encendido (quedaba
+    // enmascarado mientras aircraft.engine.on nunca llegaba a true, ver
+    // el otro BUGFIX en aircraft.js). Se inicializa aca junto al resto
+    // del estado de la parte motor.
+    else if (part.type === 'engine') { part.rpm = 0; part.currentThrust = 0; aircraft.engines.push(part); }
     else if (part.type === 'balloon' || part.type === 'envelope') aircraft.balloons.push(part);
     if (part.suspension) aircraft.suspensions.push(part);
 
