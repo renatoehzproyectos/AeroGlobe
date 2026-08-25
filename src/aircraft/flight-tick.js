@@ -84,6 +84,22 @@ export function makeFlightTick(aircraft, deps) {
         ac.groundContact = true;
         if (maxPenetration > 0.001 && !sim.cautiousWithTerrain) {
           ac.llaLocation[2] += maxPenetration;
+          // Position correction alone is unstable: the plane is teleported
+          // out of the ground but keeps its downward velocity, so the next
+          // substep re-penetrates and the three wheels feed energy into
+          // rotation ("breakdance"). Kill the penetrating normal velocity
+          // at the CG after the lift. Angular is clamped softly so a hard
+          // one-wheel hit cannot spin the airframe into a blender.
+          const rb = ac.rigidBody;
+          if (rb.v_linearVelocity[2] < 0) {
+            rb.v_linearVelocity[2] = 0;
+          }
+          const w = rb.v_angularVelocity;
+          const wLen = Math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+          if (wLen > 2) {
+            const s = 2 / wLen;
+            w[0] *= s; w[1] *= s; w[2] *= s;
+          }
         }
         resolveContacts(ac, contacts, subDt);
       }

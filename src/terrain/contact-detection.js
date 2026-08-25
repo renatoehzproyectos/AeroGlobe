@@ -84,13 +84,17 @@ export function collectContacts(api, sim, animation, aircraft, dt) {
 
       if (ratio > 0 && origin.worldPosition[2] >= cp.worldPosition[2] && !cp.wrongAltitude) {
         const upDot = V3.dot(n, partFrame[2]);
+        // Tangents must be unit-length: a non-unit friction direction
+        // scales the Coulomb impulse wrong and feeds spin on the gear.
+        const fwdRaw = V3.cross(n, V3.normalize(partFrame[0]));
+        const sideRaw = V3.cross(n, V3.normalize(partFrame[1]));
         const contact = {
           collisionPoint: cp,
           normal: n,
           force: part.suspension.stiffness * travel,
           type: 'raycast',
-          contactFwdDir: V3.cross(n, V3.normalize(partFrame[0])),
-          contactSideDir: V3.cross(n, V3.normalize(partFrame[1])),
+          contactFwdDir: V3.length(fwdRaw) > 1e-8 ? V3.normalize(fwdRaw) : [1, 0, 0],
+          contactSideDir: V3.length(sideRaw) > 1e-8 ? V3.normalize(sideRaw) : [0, 1, 0],
         };
         if (ratio >= part.suspension.hardPoint || upDot < 0.4) {
           contact.type = 'hardpoint';
@@ -115,13 +119,15 @@ export function collectContacts(api, sim, animation, aircraft, dt) {
       const pen = groundZ - pointLla[2];
       if (pen >= 0 && !cp.wrongAltitude) {
         maxPenetration = Math.max(maxPenetration, pen);
+        const fwdRaw = V3.cross(n, V3.normalize(partFrame[0]));
+        const sideRaw = V3.cross(n, V3.normalize(partFrame[1]));
         const contact = {
           collisionPoint: cp,
           normal: n,
           penetration: pen,
           type: 'standard',
-          contactFwdDir: V3.cross(n, V3.normalize(partFrame[0])),
-          contactSideDir: V3.cross(n, V3.normalize(partFrame[1])),
+          contactFwdDir: V3.length(fwdRaw) > 1e-8 ? V3.normalize(fwdRaw) : [1, 0, 0],
+          contactSideDir: V3.length(sideRaw) > 1e-8 ? V3.normalize(sideRaw) : [0, 1, 0],
         };
         part.contact = contact;
         contacts.push(contact);
@@ -149,6 +155,21 @@ export function handleContacts(api, sim, animation, flight, aircraft, dt, resolv
       if (maxPenetration > MIN_PENETRATION_THRESHOLD && !sim.cautiousWithTerrain) {
         aircraft.llaLocation[2] += maxPenetration;
         maxPenetration = 0;
+        // Same velocity kill as flight-tick: position correction without
+        // removing penetrating velocity re-injects the plane into the
+        // ground next substep and the gear starts breakdancing.
+        const rb = aircraft.rigidBody;
+        if (rb && rb.v_linearVelocity && rb.v_linearVelocity[2] < 0) {
+          rb.v_linearVelocity[2] = 0;
+        }
+        if (rb && rb.v_angularVelocity) {
+          const w = rb.v_angularVelocity;
+          const wLen = Math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+          if (wLen > 2) {
+            const s = 2 / wLen;
+            w[0] *= s; w[1] *= s; w[2] *= s;
+          }
+        }
       }
       resolveContactsFn(aircraft, contacts, dt);
     }
